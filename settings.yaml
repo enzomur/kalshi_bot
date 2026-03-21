@@ -1,0 +1,128 @@
+# Kalshi Arbitrage Bot Configuration
+# Non-sensitive settings - credentials go in .env file
+
+# Trading parameters
+trading:
+  # Minimum profit threshold in cents to consider an opportunity
+  min_profit_cents: 1
+
+  # Maximum position size in contracts
+  max_position_size: 100
+
+  # Maximum percentage of balance to risk on single trade
+  max_position_pct: 0.10
+
+  # Kelly criterion fraction (0.25 = quarter Kelly for safety)
+  kelly_fraction: 0.25
+
+  # Execution confidence for Kelly adjustment
+  execution_confidence: 0.9
+
+  # Minimum edge required to trade (after fees)
+  min_edge: 0.005
+
+  # Execution safeguards
+  max_slippage_cents: 3  # Max allowed price slippage before aborting
+  min_net_profit_pct: 0.005  # Minimum 0.5% net profit (was 2%)
+
+  # Paper trading mode - START WITH THIS ENABLED
+  paper_trading_mode: true
+
+# Risk management
+risk:
+  # Maximum drawdown before circuit breaker triggers (20%)
+  max_drawdown: 0.20
+
+  # Maximum daily loss in dollars
+  max_daily_loss: 100.0
+
+  # Consecutive failures before halt
+  max_consecutive_failures: 5
+
+  # Minimum success rate over rolling window
+  min_success_rate: 0.40
+
+  # Rolling window size for success rate calculation
+  success_rate_window: 20
+
+  # Enhanced circuit breaker settings
+  circuit_breaker_cooldown: 1800  # 30 minutes (was 5 minutes)
+  circuit_breaker_reset_count: 3  # Require 3 consecutive successes to reset
+  portfolio_stop_threshold: 0.50  # 50% loss = hard stop (manual reset required)
+
+# Portfolio settings
+portfolio:
+  # Initial principal (set this when starting the bot)
+  initial_principal: 1000.0
+
+  # ROI multiplier to trigger profit lock (2.0 = 2x ROI)
+  profit_lock_multiplier: 2.0
+
+  # Sync interval with Kalshi API in seconds
+  sync_interval: 60
+
+  # Take profit threshold (1.0 = 100% gain, sell when position doubles)
+  take_profit_pct: 1.0
+
+# Arbitrage detection
+# ONLY TRUE ARBITRAGE STRATEGIES - speculative strategies removed entirely
+arbitrage:
+  # Enable single market arbitrage (YES + NO < 100) - TRUE ARBITRAGE
+  enable_single_market: true
+
+  # Enable multi-outcome arbitrage (sum of outcomes < 100) - TRUE ARBITRAGE
+  enable_multi_outcome: true
+
+  # Enable cross-market arbitrage - DISABLED by default (requires pre-configured relationships)
+  enable_cross_market: false
+
+  # Allow dynamic cross-market relationship detection - DISABLED (risky, may produce false positives)
+  allow_dynamic_detection: false
+
+  # Minimum liquidity required (contracts available)
+  min_liquidity: 1
+
+  # Maximum spread to consider (in cents)
+  max_spread: 15
+
+# API settings
+api:
+  # Request timeout in seconds
+  timeout: 60
+
+  # Rate limit: requests per second
+  requests_per_second: 10
+
+  # WebSocket reconnect delay in seconds
+  ws_reconnect_delay: 5
+
+  # Maximum WebSocket reconnect attempts
+  ws_max_reconnects: 10
+
+# Dashboard settings
+dashboard:
+  # Enable FastAPI dashboard
+  enabled: true
+
+  # Dashboard host
+  host: "127.0.0.1"
+
+  # Dashboard port
+  port: 8000
+
+# Logging
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  level: INFO
+
+  # Log file path (null for stdout only)
+  file: "logs/kalshi_bot.log"
+
+  # Enable JSON structured logging
+  json_format: false
+
+  # Log rotation: max file size in MB
+  max_file_size_mb: 10
+
+  # Number of backup files to keep
+  backup_count: 5
