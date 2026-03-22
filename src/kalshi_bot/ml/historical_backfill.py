@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from kalshi_bot.utils.logging import get_logger
@@ -69,7 +69,7 @@ class HistoricalBackfiller:
     async def backfill_settled_markets(
         self,
         days_back: int = 90,
-        max_pages: int | None = None,
+        max_pages: int = 500,  # Default limit: 50K markets to avoid timeouts
         min_volume: int = 0,
     ) -> int:
         """
@@ -85,8 +85,8 @@ class HistoricalBackfiller:
         """
         logger.info(f"Backfilling settled markets (last {days_back} days)...")
 
-        # Get cutoff date
-        cutoff_time = datetime.utcnow() - timedelta(days=days_back)
+        # Get cutoff date (timezone-aware to match API datetimes)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=days_back)
 
         # Fetch all settled markets
         all_markets = await self._api_client.get_all_settled_markets(
@@ -97,20 +97,30 @@ class HistoricalBackfiller:
         logger.info(f"Found {len(all_markets)} settled markets from API")
 
         # Filter by date if we have close_time
-        markets_in_range = [
-            m for m in all_markets
-            if m.close_time is None or m.close_time >= cutoff_time
-        ]
+        # Handle both timezone-aware and naive datetimes
+        def is_in_range(close_time: datetime | None) -> bool:
+            if close_time is None:
+                return True
+            # Make timezone-aware if naive
+            if close_time.tzinfo is None:
+                close_time = close_time.replace(tzinfo=timezone.utc)
+            return close_time >= cutoff_time
+
+        markets_in_range = [m for m in all_markets if is_in_range(m.close_time)]
 
         logger.info(f"{len(markets_in_range)} markets within {days_back} day range")
 
         added_count = 0
+        skipped_no_outcome = 0
 
         for market in markets_in_range:
-            # Determine outcome from last_price
-            outcome = self._infer_outcome_from_price(market.last_price)
+            # Use result field if available, otherwise infer from price
+            outcome = market.result  # "yes" or "no" from API
             if not outcome:
-                logger.debug(f"Could not determine outcome for {market.ticker} (price={market.last_price})")
+                # Fallback to inferring from price
+                outcome = self._infer_outcome_from_price(market.last_price)
+            if not outcome:
+                skipped_no_outcome += 1
                 continue
 
             # Check if already recorded
@@ -156,7 +166,10 @@ class HistoricalBackfiller:
             except Exception as e:
                 logger.debug(f"Error adding settlement for {market.ticker}: {e}")
 
-        logger.info(f"Backfilled {added_count} new settled markets")
+        if skipped_no_outcome > 0:
+            logger.info(f"Backfilled {added_count} new settled markets (skipped {skipped_no_outcome} with no outcome)")
+        else:
+            logger.info(f"Backfilled {added_count} new settled markets")
         return added_count
 
     async def backfill_candlesticks(

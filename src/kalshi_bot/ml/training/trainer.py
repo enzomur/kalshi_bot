@@ -85,7 +85,7 @@ class ModelTrainer:
 
     # Minimum requirements for training
     MIN_SETTLEMENTS = 100
-    MIN_SNAPSHOTS_PER_MARKET = 10
+    MIN_SNAPSHOTS_PER_MARKET = 1  # Lowered from 10 to use available data
 
     # Sampling parameters
     HOURS_BEFORE_SETTLEMENT = [1, 3, 6, 12, 24]

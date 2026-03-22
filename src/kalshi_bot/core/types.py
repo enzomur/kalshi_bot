@@ -225,6 +225,7 @@ class MarketData:
     open_interest: int = 0
     close_time: datetime | None = None
     expiration_time: datetime | None = None
+    result: str | None = None  # Settlement result: "yes" or "no"
 
     @property
     def mid_price(self) -> float | None:
@@ -257,6 +258,7 @@ class MarketData:
             "open_interest": self.open_interest,
             "close_time": self.close_time.isoformat() if self.close_time else None,
             "expiration_time": self.expiration_time.isoformat() if self.expiration_time else None,
+            "result": self.result,
         }
 
 

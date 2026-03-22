@@ -269,6 +269,7 @@ class KalshiAPIClient:
                 )
                 if market.get("expiration_time")
                 else None,
+                result=market.get("result"),
             )
             markets.append(market_data)
 
@@ -372,6 +373,7 @@ class KalshiAPIClient:
             )
             if market.get("expiration_time")
             else None,
+            result=market.get("result"),
         )
 
     async def get_orderbook(self, ticker: str, depth: int = 10) -> OrderBook:
@@ -747,6 +749,7 @@ class KalshiAPIClient:
                 )
                 if market.get("expiration_time")
                 else None,
+                result=market.get("result"),
             )
             markets.append(market_data)
 
