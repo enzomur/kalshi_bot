@@ -440,16 +440,23 @@ class FeatureEngineer:
         return "other"
 
     def _parse_datetime(self, value) -> datetime | None:
-        """Parse datetime from various formats."""
+        """Parse datetime from various formats, returning naive UTC datetime."""
         if value is None:
             return None
         if isinstance(value, datetime):
+            # Strip timezone info if present
+            if value.tzinfo is not None:
+                return value.replace(tzinfo=None)
             return value
         if isinstance(value, str):
             try:
                 # Handle ISO format with various timezone indicators
                 clean = value.replace("Z", "+00:00")
-                return datetime.fromisoformat(clean)
+                dt = datetime.fromisoformat(clean)
+                # Strip timezone info to get naive UTC datetime
+                if dt.tzinfo is not None:
+                    return dt.replace(tzinfo=None)
+                return dt
             except ValueError:
                 return None
         return None

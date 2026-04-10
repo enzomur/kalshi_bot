@@ -18,6 +18,16 @@ from kalshi_bot.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _dollars_to_cents(val: str | None) -> int | None:
+    """Convert dollar string (e.g. '0.42') to cents (42)."""
+    if val is None:
+        return None
+    try:
+        return int(float(val) * 100)
+    except (ValueError, TypeError):
+        return None
+
+
 class KalshiAPIClient:
     """Async HTTP client for Kalshi trading API."""
 
@@ -254,11 +264,11 @@ class KalshiAPIClient:
                 title=market.get("title", ""),
                 subtitle=market.get("subtitle"),
                 status=market.get("status", "open"),
-                yes_bid=market.get("yes_bid"),
-                yes_ask=market.get("yes_ask"),
-                no_bid=market.get("no_bid"),
-                no_ask=market.get("no_ask"),
-                last_price=market.get("last_price"),
+                yes_bid=_dollars_to_cents(market.get("yes_bid_dollars")),
+                yes_ask=_dollars_to_cents(market.get("yes_ask_dollars")),
+                no_bid=_dollars_to_cents(market.get("no_bid_dollars")),
+                no_ask=_dollars_to_cents(market.get("no_ask_dollars")),
+                last_price=_dollars_to_cents(market.get("last_price_dollars")),
                 volume=market.get("volume", 0),
                 open_interest=market.get("open_interest", 0),
                 close_time=datetime.fromisoformat(market["close_time"].replace("Z", "+00:00"))
@@ -358,11 +368,11 @@ class KalshiAPIClient:
             title=market.get("title", ""),
             subtitle=market.get("subtitle"),
             status=market.get("status", "open"),
-            yes_bid=market.get("yes_bid"),
-            yes_ask=market.get("yes_ask"),
-            no_bid=market.get("no_bid"),
-            no_ask=market.get("no_ask"),
-            last_price=market.get("last_price"),
+            yes_bid=_dollars_to_cents(market.get("yes_bid_dollars")),
+            yes_ask=_dollars_to_cents(market.get("yes_ask_dollars")),
+            no_bid=_dollars_to_cents(market.get("no_bid_dollars")),
+            no_ask=_dollars_to_cents(market.get("no_ask_dollars")),
+            last_price=_dollars_to_cents(market.get("last_price_dollars")),
             volume=market.get("volume", 0),
             open_interest=market.get("open_interest", 0),
             close_time=datetime.fromisoformat(market["close_time"].replace("Z", "+00:00"))
@@ -734,11 +744,11 @@ class KalshiAPIClient:
                 title=market.get("title", ""),
                 subtitle=market.get("subtitle"),
                 status=market.get("status", "settled"),
-                yes_bid=market.get("yes_bid"),
-                yes_ask=market.get("yes_ask"),
-                no_bid=market.get("no_bid"),
-                no_ask=market.get("no_ask"),
-                last_price=market.get("last_price"),
+                yes_bid=_dollars_to_cents(market.get("yes_bid_dollars")),
+                yes_ask=_dollars_to_cents(market.get("yes_ask_dollars")),
+                no_bid=_dollars_to_cents(market.get("no_bid_dollars")),
+                no_ask=_dollars_to_cents(market.get("no_ask_dollars")),
+                last_price=_dollars_to_cents(market.get("last_price_dollars")),
                 volume=market.get("volume", 0),
                 open_interest=market.get("open_interest", 0),
                 close_time=datetime.fromisoformat(market["close_time"].replace("Z", "+00:00"))

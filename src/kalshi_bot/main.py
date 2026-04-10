@@ -336,6 +336,91 @@ async def show_ml_status(settings: Settings) -> int:
         await db.close()
 
 
+async def run_backtest(
+    settings: Settings,
+    initial_balance: float,
+    start_date: str | None,
+    end_date: str | None,
+    output_path: str | None,
+    verbose: bool,
+) -> int:
+    """Run a backtest on historical data."""
+    from datetime import datetime
+    from kalshi_bot.persistence.database import Database
+    from kalshi_bot.backtesting.engine import BacktestEngine, BacktestConfig
+    from kalshi_bot.backtesting.report import ReportGenerator
+
+    logger.info("Starting backtest...")
+
+    db = Database(settings.database_path)
+    try:
+        await db.initialize()
+
+        engine = BacktestEngine(db, settings)
+
+        # Get data summary first
+        summary = await engine.get_data_summary()
+        print(f"\nHistorical Data Summary:")
+        print(f"  Total snapshots: {summary.get('total_snapshots', 0)}")
+        print(f"  Unique markets: {summary.get('unique_tickers', 0)}")
+        print(f"  Date range: {summary.get('earliest_date', 'N/A')} to {summary.get('latest_date', 'N/A')}")
+        print(f"  Total settlements: {summary.get('total_settlements', 0)}")
+
+        if summary.get('total_snapshots', 0) == 0:
+            print("\nNo historical data available. Run the bot to collect data first.")
+            return 1
+
+        # Parse dates
+        config_start = None
+        config_end = None
+        if start_date:
+            config_start = datetime.fromisoformat(start_date)
+        if end_date:
+            config_end = datetime.fromisoformat(end_date)
+
+        # Create config
+        config = BacktestConfig(
+            start_date=config_start,
+            end_date=config_end,
+            initial_balance=initial_balance,
+            verbose=verbose,
+        )
+
+        print(f"\nRunning backtest with ${initial_balance:,.2f} initial balance...")
+
+        # Progress callback
+        def on_progress(progress):
+            if verbose and progress.current_step % 50 == 0:
+                print(f"  Step {progress.current_step}/{progress.total_steps}")
+
+        # Run backtest
+        result = await engine.run(config, progress_callback=on_progress)
+
+        if not result.success:
+            print(f"\nBacktest failed: {result.error_message}")
+            return 1
+
+        # Generate and display report
+        reporter = ReportGenerator(result)
+        reporter.print_report()
+
+        # Save report if output path specified
+        if output_path:
+            reporter.save_report(output_path)
+            print(f"\nReport saved to: {output_path}")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Backtest failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+    finally:
+        await db.close()
+
+
 async def export_opportunities(settings: Settings, output_path: str, max_markets: int) -> int:
     """Export market opportunities for Claude Code analysis."""
     from kalshi_bot.analysis.opportunity_exporter import OpportunityExporter
@@ -464,6 +549,47 @@ def parse_args() -> argparse.Namespace:
         help="Include archived/historical data (>3 months old)",
     )
 
+    # Backtesting
+    parser.add_argument(
+        "--backtest",
+        action="store_true",
+        help="Run a backtest on historical data",
+    )
+
+    parser.add_argument(
+        "--backtest-balance",
+        type=float,
+        default=10000.0,
+        help="Initial balance for backtest (default: 10000)",
+    )
+
+    parser.add_argument(
+        "--backtest-start",
+        type=str,
+        default=None,
+        help="Backtest start date (YYYY-MM-DD format)",
+    )
+
+    parser.add_argument(
+        "--backtest-end",
+        type=str,
+        default=None,
+        help="Backtest end date (YYYY-MM-DD format)",
+    )
+
+    parser.add_argument(
+        "--backtest-output",
+        type=str,
+        default=None,
+        help="Output file for backtest report (supports .txt, .json, .md, .html)",
+    )
+
+    parser.add_argument(
+        "--backtest-verbose",
+        action="store_true",
+        help="Enable verbose backtest output",
+    )
+
     return parser.parse_args()
 
 
@@ -497,6 +623,17 @@ def main() -> int:
             days=args.days,
             include_candlesticks=not args.no_candlesticks,
             include_historical=args.include_historical,
+        ))
+
+    # Handle backtest command
+    if args.backtest:
+        return asyncio.run(run_backtest(
+            settings,
+            initial_balance=args.backtest_balance,
+            start_date=args.backtest_start,
+            end_date=args.backtest_end,
+            output_path=args.backtest_output,
+            verbose=args.backtest_verbose,
         ))
 
     logger.info("=" * 60)

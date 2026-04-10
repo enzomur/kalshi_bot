@@ -32,6 +32,14 @@ class ModelMetrics:
     recall_yes: float = 0.0
     precision_no: float = 0.0
     recall_no: float = 0.0
+    f1_yes: float = 0.0  # F1 for YES class (minority)
+    f1_no: float = 0.0   # F1 for NO class (majority)
+
+    # Balanced metrics (important for imbalanced data)
+    balanced_accuracy: float = 0.0
+
+    # Optimal threshold for imbalanced classification
+    optimal_threshold: float = 0.5
 
     # Sample info
     n_samples: int = 0
@@ -52,6 +60,10 @@ class ModelMetrics:
             "recall_yes": self.recall_yes,
             "precision_no": self.precision_no,
             "recall_no": self.recall_no,
+            "f1_yes": self.f1_yes,
+            "f1_no": self.f1_no,
+            "balanced_accuracy": self.balanced_accuracy,
+            "optimal_threshold": self.optimal_threshold,
             "n_samples": self.n_samples,
             "n_positive": self.n_positive,
             "n_negative": self.n_negative,
@@ -72,6 +84,10 @@ class ModelMetrics:
             recall_yes=data.get("recall_yes", 0.0),
             precision_no=data.get("precision_no", 0.0),
             recall_no=data.get("recall_no", 0.0),
+            f1_yes=data.get("f1_yes", 0.0),
+            f1_no=data.get("f1_no", 0.0),
+            balanced_accuracy=data.get("balanced_accuracy", 0.0),
+            optimal_threshold=data.get("optimal_threshold", 0.5),
             n_samples=data.get("n_samples", 0),
             n_positive=data.get("n_positive", 0),
             n_negative=data.get("n_negative", 0),
@@ -237,6 +253,7 @@ class BasePredictionModel(ABC):
         """
         from sklearn.metrics import (
             accuracy_score,
+            balanced_accuracy_score,
             brier_score_loss,
             f1_score,
             log_loss,
@@ -251,8 +268,15 @@ class BasePredictionModel(ABC):
         n_positive = int(np.sum(y_true))
         n_negative = n_samples - n_positive
 
-        # Basic metrics
-        accuracy = accuracy_score(y_true, y_pred)
+        # Find optimal threshold for F1 score on minority class
+        optimal_threshold = self._find_optimal_threshold(y_true, y_proba)
+
+        # Use optimal threshold for predictions
+        y_pred_optimal = (y_proba >= optimal_threshold).astype(int)
+
+        # Basic metrics (using optimal threshold)
+        accuracy = accuracy_score(y_true, y_pred_optimal)
+        balanced_acc = balanced_accuracy_score(y_true, y_pred_optimal)
 
         # AUC - requires both classes
         try:
@@ -266,17 +290,17 @@ class BasePredictionModel(ABC):
         except ValueError:
             ll = float("inf")
 
-        # Precision/Recall/F1
-        precision = precision_score(y_true, y_pred, zero_division=0)
-        recall = recall_score(y_true, y_pred, zero_division=0)
-        f1 = f1_score(y_true, y_pred, zero_division=0)
+        # Precision/Recall/F1 (using optimal threshold)
+        precision = precision_score(y_true, y_pred_optimal, zero_division=0)
+        recall = recall_score(y_true, y_pred_optimal, zero_division=0)
+        f1 = f1_score(y_true, y_pred_optimal, zero_division=0)
 
         # Brier score (calibration)
         brier = brier_score_loss(y_true, y_proba)
 
         # Per-class metrics
-        prec_per_class, rec_per_class, _, _ = precision_recall_fscore_support(
-            y_true, y_pred, labels=[0, 1], zero_division=0
+        prec_per_class, rec_per_class, f1_per_class, _ = precision_recall_fscore_support(
+            y_true, y_pred_optimal, labels=[0, 1], zero_division=0
         )
 
         return ModelMetrics(
@@ -291,10 +315,44 @@ class BasePredictionModel(ABC):
             recall_yes=rec_per_class[1],
             precision_no=prec_per_class[0],
             recall_no=rec_per_class[0],
+            f1_yes=f1_per_class[1],
+            f1_no=f1_per_class[0],
+            balanced_accuracy=balanced_acc,
+            optimal_threshold=optimal_threshold,
             n_samples=n_samples,
             n_positive=n_positive,
             n_negative=n_negative,
         )
+
+    def _find_optimal_threshold(
+        self,
+        y_true: np.ndarray,
+        y_proba: np.ndarray,
+    ) -> float:
+        """
+        Find optimal threshold that maximizes F1 score for minority class.
+
+        Args:
+            y_true: True labels
+            y_proba: Predicted probabilities
+
+        Returns:
+            Optimal threshold value
+        """
+        from sklearn.metrics import f1_score
+
+        best_threshold = 0.5
+        best_f1 = 0.0
+
+        # Search through thresholds
+        for threshold in np.arange(0.1, 0.9, 0.05):
+            y_pred = (y_proba >= threshold).astype(int)
+            f1 = f1_score(y_true, y_pred, zero_division=0)
+            if f1 > best_f1:
+                best_f1 = f1
+                best_threshold = threshold
+
+        return float(best_threshold)
 
     def cross_validate(
         self,
@@ -305,6 +363,9 @@ class BasePredictionModel(ABC):
     ) -> CVResults:
         """
         Perform cross-validation.
+
+        Uses F1 score for minority class as primary metric (not accuracy)
+        because the dataset is heavily imbalanced.
 
         Args:
             X: Feature matrix
@@ -335,7 +396,8 @@ class BasePredictionModel(ABC):
             y_pred = fold_model.predict(X_val)
 
             metrics = self._compute_metrics(y_val, y_pred, y_proba)
-            fold_scores.append(metrics.accuracy)
+            # Use F1 for YES class as primary score (minority class performance)
+            fold_scores.append(metrics.f1_yes)
             fold_metrics.append(metrics)
 
         self.cv_results = CVResults(

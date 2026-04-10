@@ -110,6 +110,17 @@ dashboard:
   # Dashboard port
   port: 8000
 
+# Machine Learning
+ml:
+  # Enable ML-based trading predictions
+  enabled: true
+
+  # Minimum edge threshold to trade (model prob - market prob)
+  min_edge_threshold: 0.05
+
+  # Minimum confidence to act on prediction
+  min_confidence: 0.60
+
 # Logging
 logging:
   # Log level: DEBUG, INFO, WARNING, ERROR

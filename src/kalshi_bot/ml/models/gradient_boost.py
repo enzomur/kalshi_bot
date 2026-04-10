@@ -53,6 +53,7 @@ class GradientBoostModel(BasePredictionModel):
 
         self._model = None
         self._feature_names: list[str] = []
+        self._optimal_threshold: float = 0.5
 
     @property
     def model_type(self) -> str:
@@ -78,8 +79,10 @@ class GradientBoostModel(BasePredictionModel):
         """
         try:
             import lightgbm as lgb
-        except ImportError:
-            logger.error("LightGBM not installed. Using sklearn GradientBoosting.")
+            # Try to actually use LightGBM to verify it works
+            _ = lgb.Dataset(X[:10], label=y[:10])
+        except (ImportError, OSError) as e:
+            logger.warning(f"LightGBM unavailable ({e}). Using sklearn GradientBoosting.")
             return self._train_sklearn(X, y, feature_names)
 
         logger.info(f"Training LightGBM model on {len(y)} samples")
@@ -125,14 +128,16 @@ class GradientBoostModel(BasePredictionModel):
         y_proba = self._model.predict(X)
         y_pred = (y_proba >= 0.5).astype(int)
 
-        # Compute metrics
+        # Compute metrics (this finds optimal threshold automatically)
         self.metrics = self._compute_metrics(y, y_pred, y_proba)
+        self._optimal_threshold = self.metrics.optimal_threshold
         self.trained_at = datetime.utcnow()
         self._is_trained = True
 
         logger.info(
-            f"Model trained: accuracy={self.metrics.accuracy:.3f}, "
-            f"AUC={self.metrics.auc:.3f}, brier={self.metrics.brier_score:.3f}"
+            f"Model trained: F1(YES)={self.metrics.f1_yes:.3f}, "
+            f"balanced_acc={self.metrics.balanced_accuracy:.3f}, "
+            f"AUC={self.metrics.auc:.3f}, optimal_threshold={self._optimal_threshold:.2f}"
         )
 
         return self.metrics
@@ -169,9 +174,17 @@ class GradientBoostModel(BasePredictionModel):
         y_proba = self._model.predict_proba(X)[:, 1]
         y_pred = self._model.predict(X)
 
+        # Compute metrics (this finds optimal threshold automatically)
         self.metrics = self._compute_metrics(y, y_pred, y_proba)
+        self._optimal_threshold = self.metrics.optimal_threshold
         self.trained_at = datetime.utcnow()
         self._is_trained = True
+
+        logger.info(
+            f"Model trained: F1(YES)={self.metrics.f1_yes:.3f}, "
+            f"balanced_acc={self.metrics.balanced_accuracy:.3f}, "
+            f"AUC={self.metrics.auc:.3f}, optimal_threshold={self._optimal_threshold:.2f}"
+        )
 
         return self.metrics
 
@@ -198,6 +211,27 @@ class GradientBoostModel(BasePredictionModel):
         # sklearn fallback
         return self._model.predict_proba(X)[:, 1]
 
+    def predict(self, X: np.ndarray, threshold: float | None = None) -> np.ndarray:
+        """
+        Predict binary outcomes using optimal threshold.
+
+        Args:
+            X: Feature matrix
+            threshold: Override threshold (uses optimal if None)
+
+        Returns:
+            Array of predictions (1 for YES, 0 for NO)
+        """
+        if threshold is None:
+            threshold = self._optimal_threshold
+        proba = self.predict_proba(X)
+        return (proba >= threshold).astype(int)
+
+    @property
+    def optimal_threshold(self) -> float:
+        """Get the optimal classification threshold."""
+        return self._optimal_threshold
+
     def save(self, path: str | Path) -> None:
         """
         Save model to disk.
@@ -219,6 +253,7 @@ class GradientBoostModel(BasePredictionModel):
             "metrics": self.metrics.to_dict() if self.metrics else None,
             "cv_results": self.cv_results.to_dict() if self.cv_results else None,
             "feature_importance": self.feature_importance,
+            "optimal_threshold": self._optimal_threshold,
             "params": {
                 "n_estimators": self._n_estimators,
                 "max_depth": self._max_depth,
@@ -248,6 +283,7 @@ class GradientBoostModel(BasePredictionModel):
         self.model_id = model_data["model_id"]
         self.trained_at = model_data["trained_at"]
         self.feature_importance = model_data.get("feature_importance", {})
+        self._optimal_threshold = model_data.get("optimal_threshold", 0.5)
 
         params = model_data.get("params", {})
         self._n_estimators = params.get("n_estimators", 100)

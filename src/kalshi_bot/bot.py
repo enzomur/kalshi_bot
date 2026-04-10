@@ -182,7 +182,9 @@ class KalshiArbitrageBot:
             self.settings,
             self._db,
         )
-        self._paper_executor.set_initial_balance(self._portfolio_manager.total_value)
+        # Use configured initial_principal for paper trading, not real balance
+        paper_balance = self.settings.portfolio.initial_principal if self._paper_trading_mode else self._portfolio_manager.total_value
+        self._paper_executor.set_initial_balance(paper_balance)
 
         # Set initial value for portfolio hard stop
         self._circuit_breaker.set_initial_value(self._portfolio_manager.total_value)

@@ -163,10 +163,72 @@ class ModelTrainer:
         X = np.array(X_list)
         y = np.array(y_list)
 
+        n_yes = np.sum(y)
+        n_no = len(y) - n_yes
+        imbalance_ratio = n_no / n_yes if n_yes > 0 else float('inf')
+
         logger.info(f"Prepared {len(y)} training samples from {len(settlements)} markets")
-        logger.info(f"Class distribution: YES={np.sum(y)}, NO={len(y) - np.sum(y)}")
+        logger.info(f"Class distribution: YES={n_yes} ({n_yes/len(y)*100:.1f}%), NO={n_no} ({n_no/len(y)*100:.1f}%)")
+        logger.info(f"Imbalance ratio: {imbalance_ratio:.1f}:1 (NO:YES)")
+
+        # Apply SMOTE to balance classes if heavily imbalanced
+        if imbalance_ratio > 3.0 and n_yes >= 10:
+            X, y = self._apply_smote(X, y)
 
         return X, y
+
+    def _apply_smote(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Apply SMOTE to balance the dataset.
+
+        Args:
+            X: Feature matrix
+            y: Labels
+
+        Returns:
+            Resampled (X, y) tuple
+        """
+        try:
+            from imblearn.over_sampling import SMOTE
+
+            n_yes_before = np.sum(y)
+            n_no_before = len(y) - n_yes_before
+
+            # Use SMOTE to oversample minority class
+            # Don't fully balance - aim for ~1:3 ratio (YES:NO)
+            target_yes = min(n_no_before // 3, n_yes_before * 5)
+            sampling_strategy = target_yes / n_no_before
+
+            smote = SMOTE(
+                sampling_strategy=min(sampling_strategy, 1.0),
+                random_state=42,
+                k_neighbors=min(5, n_yes_before - 1),
+            )
+            X_resampled, y_resampled = smote.fit_resample(X, y)
+
+            n_yes_after = np.sum(y_resampled)
+            n_no_after = len(y_resampled) - n_yes_after
+
+            logger.info(
+                f"SMOTE resampling: YES {n_yes_before} -> {n_yes_after}, "
+                f"NO {n_no_before} -> {n_no_after}"
+            )
+            logger.info(
+                f"New ratio: {n_no_after/n_yes_after:.1f}:1 (NO:YES)"
+            )
+
+            return X_resampled, y_resampled
+
+        except ImportError:
+            logger.warning("imbalanced-learn not installed, skipping SMOTE")
+            return X, y
+        except Exception as e:
+            logger.warning(f"SMOTE failed: {e}, using original data")
+            return X, y
 
     async def train_model(
         self,
@@ -309,6 +371,8 @@ class ModelTrainer:
             )
 
         new_metrics = json.loads(new_model["metrics"])
+        # Use F1 for YES class as primary metric (minority class performance)
+        new_f1_yes = new_metrics.get("f1_yes", new_metrics.get("f1_score", 0))
         new_accuracy = new_metrics.get("accuracy", 0)
 
         # Get current active model if not specified
@@ -328,9 +392,9 @@ class ModelTrainer:
             return ModelComparison(
                 new_model_id=new_model_id,
                 current_model_id="",
-                new_accuracy=new_accuracy,
+                new_accuracy=new_f1_yes,  # Report F1 as "accuracy" for compatibility
                 current_accuracy=0,
-                improvement=new_accuracy,
+                improvement=new_f1_yes,
                 should_replace=True,
                 reason="No current active model",
             )
@@ -345,30 +409,32 @@ class ModelTrainer:
             return ModelComparison(
                 new_model_id=new_model_id,
                 current_model_id=current_model_id,
-                new_accuracy=new_accuracy,
+                new_accuracy=new_f1_yes,
                 current_accuracy=0,
-                improvement=new_accuracy,
+                improvement=new_f1_yes,
                 should_replace=True,
                 reason="Current model not found",
             )
 
         current_metrics = json.loads(current["metrics"])
+        current_f1_yes = current_metrics.get("f1_yes", current_metrics.get("f1_score", 0))
         current_accuracy = current_metrics.get("accuracy", 0)
-        improvement = new_accuracy - current_accuracy
+        improvement = new_f1_yes - current_f1_yes
 
-        # Decision criteria: replace if improvement > 2% or new model is significantly better
-        should_replace = improvement >= 0.02
+        # Decision criteria: replace if F1 improvement > 5% (minority class is harder)
+        should_replace = improvement >= 0.05
 
         reason = (
-            f"New model accuracy {new_accuracy:.3f} vs current {current_accuracy:.3f}"
-            f" (improvement: {improvement:+.3f})"
+            f"New model F1(YES)={new_f1_yes:.3f} vs current {current_f1_yes:.3f}"
+            f" (improvement: {improvement:+.3f}), "
+            f"Accuracy: {new_accuracy:.3f}"
         )
 
         return ModelComparison(
             new_model_id=new_model_id,
             current_model_id=current_model_id,
-            new_accuracy=new_accuracy,
-            current_accuracy=current_accuracy,
+            new_accuracy=new_f1_yes,  # Report F1 as primary metric
+            current_accuracy=current_f1_yes,
             improvement=improvement,
             should_replace=should_replace,
             reason=reason,
@@ -495,15 +561,22 @@ class ModelTrainer:
         )
 
     def _parse_datetime(self, value) -> datetime | None:
-        """Parse datetime from various formats."""
+        """Parse datetime from various formats, returning naive UTC datetime."""
         if value is None:
             return None
         if isinstance(value, datetime):
+            # Strip timezone info if present
+            if value.tzinfo is not None:
+                return value.replace(tzinfo=None)
             return value
         if isinstance(value, str):
             try:
                 clean = value.replace("Z", "+00:00")
-                return datetime.fromisoformat(clean)
+                dt = datetime.fromisoformat(clean)
+                # Strip timezone info to get naive UTC datetime
+                if dt.tzinfo is not None:
+                    return dt.replace(tzinfo=None)
+                return dt
             except ValueError:
                 return None
         return None
