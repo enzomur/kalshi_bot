@@ -424,7 +424,11 @@ class KalshiArbitrageBot:
         if not self._edge_predictor:
             return []
 
-        available_capital = self._portfolio_manager.available_for_trading
+        # Use paper trading balance if in paper mode, otherwise real balance
+        if self._paper_trading_mode:
+            available_capital = self._paper_executor.get_status().get("balance", 0)
+        else:
+            available_capital = self._portfolio_manager.available_for_trading
 
         # Apply position adjustment from self-correction
         if self._position_adjuster:
