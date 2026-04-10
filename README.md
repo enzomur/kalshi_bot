@@ -23,10 +23,17 @@ An automated trading bot for [Kalshi](https://kalshi.com) prediction markets tha
 - Self-correcting position sizing based on accuracy
 - Historical data backfill for bootstrapping
 
+### Backtesting
+- Historical data replay engine
+- Position tracking and settlement simulation
+- Comprehensive metrics (Sharpe, drawdown, profit factor)
+- Report generation (text, JSON, Markdown, HTML)
+
 ### Infrastructure
 - Real-time dashboard with API endpoints
 - SQLite persistence for trades, positions, and audit logs
 - Desktop notifications for trade execution
+- Performance monitoring script
 - Comprehensive logging
 
 ## Installation
@@ -83,6 +90,21 @@ python -m kalshi_bot.main --ml-status
 python -m kalshi_bot.main --train-model
 ```
 
+### Backtesting
+```bash
+# Run backtest on historical data
+python -m kalshi_bot.main --backtest
+
+# With custom parameters
+python -m kalshi_bot.main --backtest --backtest-balance 5000 --backtest-output report.html
+```
+
+### Performance Monitoring
+```bash
+# Check paper trading performance
+python check_performance.py
+```
+
 ### Export Opportunities
 ```bash
 # Export market opportunities for analysis
@@ -95,6 +117,7 @@ python -m kalshi_bot.main --export-opportunities -o opportunities.md
 src/kalshi_bot/
 ├── api/                 # Kalshi API client and authentication
 ├── arbitrage/           # Arbitrage detection strategies
+├── backtesting/         # Historical replay and simulation
 ├── config/              # Settings and configuration
 ├── core/                # Core types and exceptions
 ├── dashboard/           # FastAPI web dashboard
