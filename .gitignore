@@ -97,3 +97,7 @@ settings.*.yaml
 # OS files
 .DS_Store
 Thumbs.db
+
+# Runtime logs
+bot.log
+performance.log
