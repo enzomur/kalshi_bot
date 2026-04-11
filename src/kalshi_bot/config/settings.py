@@ -154,6 +154,60 @@ class MLSettings(BaseModel):
         return v
 
 
+class WeatherResearchSettings(BaseModel):
+    """Settings for the Weather Research Agent."""
+
+    enabled: bool = Field(default=True)
+    update_interval_minutes: int = Field(default=15, ge=5, le=60)
+    enabled_locations: list[str] = Field(
+        default_factory=lambda: ["NYC", "CHI", "LAX", "MIA"]
+    )
+
+    @field_validator("enabled_locations")
+    @classmethod
+    def validate_locations(cls, v: list[str]) -> list[str]:
+        valid_locations = {
+            "NYC", "CHI", "LAX", "MIA", "DFW", "PHX", "HOU", "ATL",
+            "BOS", "SEA", "DEN", "PHL", "SFO", "DCA", "MSP"
+        }
+        for loc in v:
+            if loc not in valid_locations:
+                raise ValueError(f"Invalid location: {loc}. Must be one of {valid_locations}")
+        return v
+
+
+class SignalTesterSettings(BaseModel):
+    """Settings for the Signal Tester Agent."""
+
+    enabled: bool = Field(default=True)
+    backtest_days: int = Field(default=90, ge=30, le=365)
+    required_win_rate: float = Field(default=0.55, ge=0.50, le=0.80)
+    update_interval_hours: int = Field(default=24, ge=1, le=168)
+
+
+class WeatherRiskSettings(BaseModel):
+    """Settings for the Weather Risk Agent."""
+
+    enabled: bool = Field(default=True)
+    max_weather_exposure_pct: float = Field(default=0.30, ge=0.10, le=0.50)
+    max_single_location_pct: float = Field(default=0.15, ge=0.05, le=0.30)
+    min_forecast_confidence: float = Field(default=0.60, ge=0.40, le=0.90)
+
+
+class AgentsSettings(BaseModel):
+    """Settings for all trading agents."""
+
+    weather_research: WeatherResearchSettings = Field(
+        default_factory=WeatherResearchSettings
+    )
+    signal_tester: SignalTesterSettings = Field(
+        default_factory=SignalTesterSettings
+    )
+    weather_risk: WeatherRiskSettings = Field(
+        default_factory=WeatherRiskSettings
+    )
+
+
 class Settings(BaseSettings):
     """Main settings class combining env vars and YAML config."""
 
@@ -183,6 +237,7 @@ class Settings(BaseSettings):
     dashboard: DashboardSettings = Field(default_factory=DashboardSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     ml: MLSettings = Field(default_factory=MLSettings)
+    agents: AgentsSettings = Field(default_factory=AgentsSettings)
 
     @property
     def api_base_url(self) -> str:

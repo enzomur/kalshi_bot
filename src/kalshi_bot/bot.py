@@ -42,6 +42,11 @@ from kalshi_bot.ml.self_correction.monitor import PerformanceMonitor
 from kalshi_bot.ml.self_correction.adjuster import PositionAdjuster
 from kalshi_bot.ml.self_correction.disabler import StrategyDisabler
 
+# Agent imports
+from kalshi_bot.agents.weather.agent import WeatherResearchAgent
+from kalshi_bot.agents.signal_tester.agent import SignalTesterAgent
+from kalshi_bot.agents.risk.agent import WeatherRiskAgent
+
 logger = get_logger(__name__)
 
 
@@ -105,6 +110,12 @@ class KalshiArbitrageBot:
         self._ml_enabled = False
         self._last_ml_snapshot: datetime | None = None
         self._snapshot_collection_task: asyncio.Task | None = None
+
+        # Agent components
+        self._weather_agent: WeatherResearchAgent | None = None
+        self._signal_tester: SignalTesterAgent | None = None
+        self._weather_risk_agent: WeatherRiskAgent | None = None
+        self._agents_enabled = False
 
         # Check paper trading mode
         self._paper_trading_mode = getattr(
@@ -195,6 +206,9 @@ class KalshiArbitrageBot:
         # Initialize ML components
         await self._initialize_ml_components()
 
+        # Initialize agent components
+        await self._initialize_agents()
+
         await self._audit_repo.log(
             "bot_initialized",
             {
@@ -202,6 +216,7 @@ class KalshiArbitrageBot:
                 "environment": self.settings.environment.value,
                 "paper_trading_mode": self._paper_trading_mode,
                 "ml_enabled": self._ml_enabled,
+                "agents_enabled": self._agents_enabled,
             },
             "info",
             component="bot",
@@ -261,6 +276,62 @@ class KalshiArbitrageBot:
         else:
             logger.info("ML trading DISABLED (data collection active)")
 
+    async def _initialize_agents(self) -> None:
+        """Initialize multi-agent system components."""
+        agent_settings = self.settings.agents
+
+        # Check if any agents are enabled
+        any_enabled = (
+            agent_settings.weather_research.enabled or
+            agent_settings.signal_tester.enabled or
+            agent_settings.weather_risk.enabled
+        )
+
+        if not any_enabled:
+            logger.info("All agents DISABLED")
+            return
+
+        self._agents_enabled = True
+
+        # Initialize Weather Research Agent
+        if agent_settings.weather_research.enabled:
+            self._weather_agent = WeatherResearchAgent(
+                db=self._db,
+                api_client=self._api_client,
+                enabled_locations=agent_settings.weather_research.enabled_locations,
+                update_interval_minutes=agent_settings.weather_research.update_interval_minutes,
+                enabled=True,
+            )
+            logger.info(
+                f"Weather agent initialized for locations: "
+                f"{agent_settings.weather_research.enabled_locations}"
+            )
+
+        # Initialize Signal Tester Agent
+        if agent_settings.signal_tester.enabled:
+            self._signal_tester = SignalTesterAgent(
+                db=self._db,
+                backtest_days=agent_settings.signal_tester.backtest_days,
+                required_win_rate=agent_settings.signal_tester.required_win_rate,
+                update_interval_hours=agent_settings.signal_tester.update_interval_hours,
+                enabled=True,
+            )
+            logger.info("Signal tester agent initialized")
+
+        # Initialize Weather Risk Agent
+        if agent_settings.weather_risk.enabled:
+            self._weather_risk_agent = WeatherRiskAgent(
+                db=self._db,
+                weather_agent=self._weather_agent,
+                max_weather_exposure_pct=agent_settings.weather_risk.max_weather_exposure_pct,
+                max_single_location_pct=agent_settings.weather_risk.max_single_location_pct,
+                min_forecast_confidence=agent_settings.weather_risk.min_forecast_confidence,
+                enabled=True,
+            )
+            logger.info("Weather risk agent initialized")
+
+        logger.info("Agent system initialized")
+
     async def start(self) -> None:
         """Start the bot's main trading loop."""
         if self._running:
@@ -295,6 +366,28 @@ class KalshiArbitrageBot:
                 self._training_scheduler.start(self._shutdown_event)
             )
             background_tasks.append(training_task)
+
+        # Start agent background tasks
+        if self._weather_agent:
+            weather_task = asyncio.create_task(
+                self._weather_agent.start(self._shutdown_event)
+            )
+            background_tasks.append(weather_task)
+            logger.info("Weather research agent started")
+
+        if self._signal_tester:
+            signal_task = asyncio.create_task(
+                self._signal_tester.start(self._shutdown_event)
+            )
+            background_tasks.append(signal_task)
+            logger.info("Signal tester agent started")
+
+        if self._weather_risk_agent:
+            risk_task = asyncio.create_task(
+                self._weather_risk_agent.start(self._shutdown_event)
+            )
+            background_tasks.append(risk_task)
+            logger.info("Weather risk agent started")
 
         try:
             await self._main_loop()
@@ -335,6 +428,10 @@ class KalshiArbitrageBot:
         logger.info("Shutting down bot...")
 
         await self.stop()
+
+        # Clean up agents
+        if self._weather_agent:
+            await self._weather_agent.close()
 
         if self._ws_manager:
             await self._ws_manager.disconnect()
@@ -389,7 +486,7 @@ class KalshiArbitrageBot:
             )
 
         if not self._risk_manager.can_trade():
-            logger.debug("Trading disabled by risk manager")
+            logger.info("Trading disabled by risk manager")
             return
 
         # ML: Check if strategy should be disabled
@@ -402,11 +499,16 @@ class KalshiArbitrageBot:
 
         # Get traditional arbitrage opportunities
         opportunities = await self._arbitrage_detector.detect_opportunities()
+        logger.debug(f"Found {len(opportunities)} arbitrage opportunities")
 
         # ML: Get ML-based opportunities if enabled and strategy not disabled
+        logger.info(f"ML check: enabled={self._ml_enabled}, predictor={self._edge_predictor is not None}")
         if self._ml_enabled and self._edge_predictor:
-            if self._strategy_disabler is None or self._strategy_disabler.is_enabled:
+            disabler_ok = self._strategy_disabler is None or self._strategy_disabler.is_enabled
+            logger.info(f"ML strategy disabler check: disabler={self._strategy_disabler is not None}, ok={disabler_ok}")
+            if disabler_ok:
                 ml_opportunities = await self._get_ml_opportunities()
+                logger.info(f"ML opportunities found: {len(ml_opportunities)}")
                 opportunities.extend(ml_opportunities)
 
         if not opportunities:
@@ -422,6 +524,7 @@ class KalshiArbitrageBot:
     async def _get_ml_opportunities(self) -> list[ArbitrageOpportunity]:
         """Get ML-based trading opportunities."""
         if not self._edge_predictor:
+            logger.debug("ML opportunities: EdgePredictor not initialized")
             return []
 
         # Use paper trading balance if in paper mode, otherwise real balance
@@ -438,7 +541,10 @@ class KalshiArbitrageBot:
                 logger.debug(f"ML capital reduced to {multiplier:.0%} due to performance")
 
         if available_capital < 1.0:
+            logger.info(f"ML opportunities: insufficient capital (${available_capital:.2f})")
             return []
+
+        logger.info(f"ML opportunities: checking with ${available_capital:.2f} capital")
 
         try:
             trading_opps = await self._edge_predictor.get_trading_opportunities(
@@ -470,6 +576,35 @@ class KalshiArbitrageBot:
             if last_trade and (now - last_trade).total_seconds() < self._cooldown_seconds:
                 logger.debug(f"Market {market} on cooldown, skipping")
                 return
+
+        # Weather-specific risk check if weather risk agent is enabled
+        if self._weather_risk_agent and self._is_weather_market(opportunity):
+            positions_for_risk = [
+                {"ticker": p.market_ticker, "value": p.position_value}
+                for p in self._portfolio_manager.positions
+            ]
+            weather_check = await self._weather_risk_agent.pre_trade_check(
+                opportunity,
+                positions_for_risk,
+                self._portfolio_manager.total_value,
+            )
+
+            if not weather_check.approved:
+                logger.debug(
+                    f"Weather opportunity {opportunity.opportunity_id} rejected: {weather_check.reason}"
+                )
+                return
+
+            # Reduce quantity if weather risk agent suggests it
+            if weather_check.approved_quantity < opportunity.max_quantity:
+                opportunity = ArbitrageOpportunity(
+                    opportunity_id=opportunity.opportunity_id,
+                    opportunity_type=opportunity.opportunity_type,
+                    markets=opportunity.markets,
+                    expected_profit=opportunity.expected_profit,
+                    max_quantity=weather_check.approved_quantity,
+                    legs=opportunity.legs,
+                )
 
         risk_check = await self._risk_manager.pre_trade_check(
             opportunity,
@@ -647,6 +782,15 @@ class KalshiArbitrageBot:
                 "strategy_disabler": self._strategy_disabler.get_status() if self._strategy_disabler else None,
             }
 
+        agents_status = None
+        if self._agents_enabled:
+            agents_status = {
+                "enabled": self._agents_enabled,
+                "weather_research": self._weather_agent.get_status() if self._weather_agent else None,
+                "signal_tester": self._signal_tester.get_status() if self._signal_tester else None,
+                "weather_risk": self._weather_risk_agent.get_status() if self._weather_risk_agent else None,
+            }
+
         return {
             "running": self._running,
             "paper_trading_mode": self._paper_trading_mode,
@@ -658,6 +802,7 @@ class KalshiArbitrageBot:
             "position_sizer": self._position_sizer.get_status() if self._position_sizer else None,
             "api_rate_limiter": self._api_client.get_rate_limiter_status() if self._api_client else None,
             "ml": ml_status,
+            "agents": agents_status,
             "snapshot_collector": self._snapshot_collector.get_status() if self._snapshot_collector else None,
             "outcome_tracker": self._outcome_tracker.get_status() if self._outcome_tracker else None,
         }
@@ -701,3 +846,29 @@ class KalshiArbitrageBot:
     def training_scheduler(self) -> TrainingScheduler | None:
         """Get training scheduler."""
         return self._training_scheduler
+
+    @property
+    def weather_agent(self) -> WeatherResearchAgent | None:
+        """Get weather research agent."""
+        return self._weather_agent
+
+    @property
+    def signal_tester(self) -> SignalTesterAgent | None:
+        """Get signal tester agent."""
+        return self._signal_tester
+
+    @property
+    def weather_risk_agent(self) -> WeatherRiskAgent | None:
+        """Get weather risk agent."""
+        return self._weather_risk_agent
+
+    def _is_weather_market(self, opportunity: ArbitrageOpportunity) -> bool:
+        """Check if an opportunity is for a weather market."""
+        if not self._weather_agent:
+            return False
+
+        for market in opportunity.markets:
+            if self._weather_agent.is_weather_market(market):
+                return True
+
+        return False

@@ -12,6 +12,7 @@ from kalshi_bot.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from kalshi_bot.persistence.database import Database
+    from kalshi_bot.agents.weather.agent import WeatherResearchAgent
 
 logger = get_logger(__name__)
 
@@ -49,9 +50,16 @@ class MarketFeatures:
     # Confidence in features (based on data availability)
     feature_confidence: float = 1.0
 
+    # Weather-specific features (only populated for weather markets)
+    nws_probability: float | None = None       # NWS-based probability estimate
+    nws_confidence: float | None = None        # Confidence in NWS estimate
+    nws_temp_forecast: float | None = None     # Forecasted temp (normalized)
+    forecast_hours_out: float | None = None    # Hours until event
+    forecast_recency: float | None = None      # How fresh the forecast is
+
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
-        return {
+        result = {
             "ticker": self.ticker,
             "event_ticker": self.event_ticker,
             "computed_at": self.computed_at.isoformat(),
@@ -71,10 +79,18 @@ class MarketFeatures:
             "category": self.category,
             "feature_confidence": self.feature_confidence,
         }
+        # Add weather features if present
+        if self.nws_probability is not None:
+            result["nws_probability"] = self.nws_probability
+            result["nws_confidence"] = self.nws_confidence
+            result["nws_temp_forecast"] = self.nws_temp_forecast
+            result["forecast_hours_out"] = self.forecast_hours_out
+            result["forecast_recency"] = self.forecast_recency
+        return result
 
-    def to_array(self) -> np.ndarray:
+    def to_array(self, include_weather: bool = True) -> np.ndarray:
         """Convert to numpy array for model input."""
-        return np.array([
+        base_features = [
             self.current_price,
             self.price_momentum_1h,
             self.price_momentum_6h,
@@ -93,7 +109,20 @@ class MarketFeatures:
             float(self.category == "sports"),
             float(self.category == "economics"),
             float(self.category == "weather"),
-        ])
+        ]
+
+        if include_weather:
+            # Add weather features (use 0 for non-weather markets)
+            weather_features = [
+                self.nws_probability if self.nws_probability is not None else 0.0,
+                self.nws_confidence if self.nws_confidence is not None else 0.0,
+                self.nws_temp_forecast if self.nws_temp_forecast is not None else 0.0,
+                self.forecast_hours_out if self.forecast_hours_out is not None else 0.0,
+                self.forecast_recency if self.forecast_recency is not None else 0.0,
+            ]
+            base_features.extend(weather_features)
+
+        return np.array(base_features)
 
 
 # Feature names for model interpretation
@@ -116,6 +145,18 @@ FEATURE_NAMES = [
     "is_economics",
     "is_weather",
 ]
+
+# Weather-specific feature names (appended for weather markets)
+WEATHER_FEATURE_NAMES = [
+    "nws_probability",      # NWS-based probability estimate
+    "nws_confidence",       # Confidence in NWS estimate
+    "nws_temp_forecast",    # Forecasted temp (normalized)
+    "forecast_hours_out",   # Hours until weather event
+    "forecast_recency",     # How fresh the forecast is (1.0 = just fetched)
+]
+
+# All feature names including weather
+ALL_FEATURE_NAMES = FEATURE_NAMES + WEATHER_FEATURE_NAMES
 
 
 @dataclass
@@ -141,6 +182,7 @@ class FeatureEngineer:
     - Market liquidity (spread, volume, open interest)
     - Temporal patterns (time to expiry, day/hour effects)
     - Market category (politics, sports, etc.)
+    - Weather forecasts (for weather markets)
     """
 
     # Category detection keywords
@@ -148,13 +190,14 @@ class FeatureEngineer:
         "politics": ["president", "election", "congress", "senate", "vote", "trump", "biden", "democrat", "republican"],
         "sports": ["nfl", "nba", "mlb", "nhl", "game", "match", "win", "score", "team", "player"],
         "economics": ["gdp", "cpi", "inflation", "fed", "rate", "jobs", "employment", "economic"],
-        "weather": ["weather", "temperature", "rain", "snow", "hurricane", "storm"],
+        "weather": ["weather", "temperature", "rain", "snow", "hurricane", "storm", "high", "low"],
     }
 
     def __init__(
         self,
         db: Database,
         config: FeatureConfig | None = None,
+        weather_agent: "WeatherResearchAgent | None" = None,
     ) -> None:
         """
         Initialize the feature engineer.
@@ -162,9 +205,15 @@ class FeatureEngineer:
         Args:
             db: Database connection
             config: Feature configuration
+            weather_agent: Optional weather agent for weather market features
         """
         self._db = db
         self._config = config or FeatureConfig()
+        self._weather_agent = weather_agent
+
+    def set_weather_agent(self, agent: "WeatherResearchAgent") -> None:
+        """Set the weather agent for weather feature computation."""
+        self._weather_agent = agent
 
     async def compute_features(
         self,
@@ -232,6 +281,23 @@ class FeatureEngineer:
         # Compute feature confidence based on data availability
         confidence = min(1.0, len(snapshots) / 20.0)
 
+        # Initialize weather features
+        nws_probability = None
+        nws_confidence = None
+        nws_temp_forecast = None
+        forecast_hours_out = None
+        forecast_recency = None
+
+        # Get weather features if this is a weather market and we have a weather agent
+        if category == "weather" and self._weather_agent:
+            weather_features = await self._weather_agent.get_weather_features(ticker)
+            if weather_features:
+                nws_probability = weather_features.get("nws_probability")
+                nws_confidence = weather_features.get("nws_confidence")
+                nws_temp_forecast = weather_features.get("nws_temp_forecast")
+                forecast_hours_out = weather_features.get("forecast_hours_out")
+                forecast_recency = weather_features.get("forecast_recency")
+
         return MarketFeatures(
             ticker=ticker,
             event_ticker=event_ticker,
@@ -251,6 +317,11 @@ class FeatureEngineer:
             hour_of_day=hour_of_day,
             category=category,
             feature_confidence=confidence,
+            nws_probability=nws_probability,
+            nws_confidence=nws_confidence,
+            nws_temp_forecast=nws_temp_forecast,
+            forecast_hours_out=forecast_hours_out,
+            forecast_recency=forecast_recency,
         )
 
     async def compute_batch_features(
@@ -462,6 +533,13 @@ class FeatureEngineer:
         return None
 
     @staticmethod
-    def get_feature_names() -> list[str]:
+    def get_feature_names(include_weather: bool = True) -> list[str]:
         """Get list of feature names in array order."""
+        if include_weather:
+            return ALL_FEATURE_NAMES.copy()
         return FEATURE_NAMES.copy()
+
+    @staticmethod
+    def get_weather_feature_names() -> list[str]:
+        """Get list of weather-specific feature names."""
+        return WEATHER_FEATURE_NAMES.copy()

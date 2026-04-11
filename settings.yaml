@@ -121,6 +121,28 @@ ml:
   # Minimum confidence to act on prediction
   min_confidence: 0.60
 
+# Multi-Agent System
+agents:
+  # Weather Research Agent - fetches NWS forecasts
+  weather_research:
+    enabled: true
+    update_interval_minutes: 15
+    enabled_locations: ["NYC", "CHI", "LAX", "MIA"]
+
+  # Signal Tester Agent - backtests trading signals
+  signal_tester:
+    enabled: true
+    backtest_days: 90
+    required_win_rate: 0.55
+    update_interval_hours: 24
+
+  # Weather Risk Agent - enforces weather-specific limits
+  weather_risk:
+    enabled: true
+    max_weather_exposure_pct: 0.30    # Max 30% portfolio in weather markets
+    max_single_location_pct: 0.15     # Max 15% in one city
+    min_forecast_confidence: 0.60     # Require 60% NWS confidence
+
 # Logging
 logging:
   # Log level: DEBUG, INFO, WARNING, ERROR

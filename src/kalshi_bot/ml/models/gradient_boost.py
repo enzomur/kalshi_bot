@@ -205,7 +205,7 @@ class GradientBoostModel(BasePredictionModel):
             import lightgbm as lgb
             if isinstance(self._model, lgb.Booster):
                 return self._model.predict(X)
-        except ImportError:
+        except (ImportError, OSError):
             pass
 
         # sklearn fallback
@@ -318,7 +318,7 @@ class GradientBoostModel(BasePredictionModel):
                     for name, imp in zip(self._feature_names, normalized)
                 }
                 return
-        except (ImportError, AttributeError):
+        except (ImportError, OSError, AttributeError):
             pass
 
         # sklearn fallback
@@ -340,7 +340,7 @@ class GradientBoostModel(BasePredictionModel):
                     "num_trees": self._model.num_trees(),
                     "feature_names": self._feature_names,
                 }
-        except (ImportError, AttributeError):
+        except (ImportError, OSError, AttributeError):
             pass
 
         if hasattr(self._model, "n_estimators"):
