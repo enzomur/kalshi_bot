@@ -144,7 +144,7 @@ class WeatherResearchAgent(BaseAgent):
         """Get active weather markets from Kalshi."""
         try:
             # Fetch markets from Kalshi API
-            events = await self._api_client.get_events(
+            response = await self._api_client.get_events(
                 status="open",
                 limit=200,
             )
@@ -154,6 +154,8 @@ class WeatherResearchAgent(BaseAgent):
 
         weather_markets = {}
 
+        # Extract events list from response dict
+        events = response.get("events", []) if isinstance(response, dict) else []
         for event in events:
             markets = event.get("markets", [])
             for market in markets:

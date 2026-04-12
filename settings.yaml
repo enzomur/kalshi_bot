@@ -108,7 +108,7 @@ dashboard:
   host: "127.0.0.1"
 
   # Dashboard port
-  port: 8000
+  port: 8001
 
 # Machine Learning
 ml:
