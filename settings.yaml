@@ -111,9 +111,10 @@ dashboard:
   port: 8001
 
 # Machine Learning
+# DISABLED: Replaced by event-driven strategies
 ml:
   # Enable ML-based trading predictions
-  enabled: true
+  enabled: false
 
   # Minimum edge threshold to trade (model prob - market prob)
   min_edge_threshold: 0.05
@@ -123,25 +124,63 @@ ml:
 
 # Multi-Agent System
 agents:
-  # Weather Research Agent - fetches NWS forecasts
+  # Weather Research Agent - fetches NWS forecasts for weather trading
+  # ENABLED: Provides probability estimates for WeatherTrader
   weather_research:
     enabled: true
     update_interval_minutes: 15
     enabled_locations: ["NYC", "CHI", "LAX", "MIA"]
 
   # Signal Tester Agent - backtests trading signals
+  # DISABLED: Approved signals not integrated into trading logic
   signal_tester:
-    enabled: true
+    enabled: false
     backtest_days: 90
     required_win_rate: 0.55
     update_interval_hours: 24
 
   # Weather Risk Agent - enforces weather-specific limits
+  # DISABLED: WeatherTrader has its own risk controls
   weather_risk:
-    enabled: true
+    enabled: false
     max_weather_exposure_pct: 0.30    # Max 30% portfolio in weather markets
     max_single_location_pct: 0.15     # Max 15% in one city
     min_forecast_confidence: 0.60     # Require 60% NWS confidence
+
+  # Settlement Momentum Agent - trades markets converging to settlement
+  # Looks for markets in final 24-48 hours with strong price momentum
+  settlement_momentum:
+    enabled: true
+    update_interval_minutes: 15
+    max_hours_to_settlement: 48       # Only trade markets settling within 48h
+    min_momentum_strength: 0.10       # Minimum momentum strength to trade
+    min_price_for_yes: 70             # Only buy YES if price >= 70
+    max_price_for_no: 30              # Only buy NO if price <= 30
+
+  # New Market Detector - trades newly listed markets with inefficient pricing
+  # Tracks all markets, detects new ones, compares to historical fair value
+  new_market:
+    enabled: true
+    update_interval_minutes: 5
+    new_market_window_hours: 48       # Consider market "new" for 48 hours
+    min_fair_value_edge: 0.10         # Minimum edge vs fair value to trade
+
+  # Consistency Arbitrage Agent - finds mathematically inconsistent prices
+  # Pure arbitrage when probability constraints are violated
+  consistency:
+    enabled: true
+    update_interval_minutes: 10
+    min_violation_magnitude: 0.05     # Minimum constraint violation to trade
+    require_guaranteed_profit: true   # Only trade guaranteed arbitrage
+
+  # Economic Data Agent - trades economic markets using FRED API
+  # Uses leading indicators to predict GDP, CPI, jobs releases
+  economic_data:
+    enabled: true
+    update_interval_minutes: 60
+    min_edge: 0.08                    # Minimum edge to trade
+    max_days_to_settlement: 7         # Only trade markets settling within 7 days
+    # fred_api_key: ""                # Set via FRED_API_KEY env var
 
 # Logging
 logging:

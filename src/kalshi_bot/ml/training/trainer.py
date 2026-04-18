@@ -154,7 +154,8 @@ class ModelTrainer:
                 features = await self._feature_engineer.compute_features(ticker, as_of)
 
                 if features:
-                    X_list.append(features.to_array())
+                    # Use only base features (no weather) for consistent model training
+                    X_list.append(features.to_array(include_weather=False))
                     y_list.append(label)
 
         if not X_list:

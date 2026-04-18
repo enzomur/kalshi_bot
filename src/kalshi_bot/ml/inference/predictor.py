@@ -126,6 +126,14 @@ class EdgePredictor:
     # Minimum confidence for predictions
     MIN_CONFIDENCE = 0.60
 
+    # Avoid betting against extreme market prices (these are usually correct)
+    # Markets at extreme prices (>=85 or <=15 cents) are almost always priced correctly
+    # Tightened from 10-90 to 15-85 after observing losses on 90c markets
+    MIN_PRICE_FOR_YES_BET = 15  # Don't buy YES below 15 cents (market says NO is ~certain)
+    MAX_PRICE_FOR_YES_BET = 85  # Don't buy YES above 85 cents (too expensive)
+    MIN_PRICE_FOR_NO_BET = 15   # Don't buy NO below 15 cents (market says NO is ~certain anyway)
+    MAX_PRICE_FOR_NO_BET = 85   # Don't buy NO above 85 cents (market says YES is ~certain)
+
     # Kelly fraction cap
     MAX_KELLY_FRACTION = 0.25
 
@@ -211,8 +219,8 @@ class EdgePredictor:
         if features is None:
             return None
 
-        # Make prediction
-        X = features.to_array().reshape(1, -1)
+        # Make prediction (use only base features, no weather features, to match trained model)
+        X = features.to_array(include_weather=False).reshape(1, -1)
         model_prob = float(self._model.predict_proba(X)[0])
 
         # Calculate edge
@@ -256,6 +264,22 @@ class EdgePredictor:
         for ticker in tickers:
             prediction = await self.predict_edge(ticker)
             if prediction and prediction.abs_edge >= self._min_edge:
+                # Safety filter: avoid betting against extreme market prices
+                # Markets at >90 cents or <10 cents are usually correct
+                if prediction.side == "yes":
+                    if prediction.market_price <= self.MIN_PRICE_FOR_YES_BET:
+                        logger.debug(f"Skipping {ticker}: YES bet at {prediction.market_price}c <= {self.MIN_PRICE_FOR_YES_BET}c (market says NO)")
+                        continue
+                    if prediction.market_price >= self.MAX_PRICE_FOR_YES_BET:
+                        logger.debug(f"Skipping {ticker}: YES bet at {prediction.market_price}c >= {self.MAX_PRICE_FOR_YES_BET}c (too expensive)")
+                        continue
+                if prediction.side == "no":
+                    if prediction.market_price <= self.MIN_PRICE_FOR_NO_BET:
+                        logger.debug(f"Skipping {ticker}: NO bet at {prediction.market_price}c <= {self.MIN_PRICE_FOR_NO_BET}c (already NO)")
+                        continue
+                    if prediction.market_price >= self.MAX_PRICE_FOR_NO_BET:
+                        logger.debug(f"Skipping {ticker}: NO bet at {prediction.market_price}c >= {self.MAX_PRICE_FOR_NO_BET}c (market says YES)")
+                        continue
                 predictions.append(prediction)
 
         # Sort by absolute edge (highest first)

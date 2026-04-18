@@ -194,6 +194,45 @@ class WeatherRiskSettings(BaseModel):
     min_forecast_confidence: float = Field(default=0.60, ge=0.40, le=0.90)
 
 
+class SettlementMomentumSettings(BaseModel):
+    """Settings for the Settlement Momentum Agent."""
+
+    enabled: bool = Field(default=True)
+    update_interval_minutes: int = Field(default=15, ge=5, le=60)
+    max_hours_to_settlement: float = Field(default=48.0, ge=12.0, le=168.0)
+    min_momentum_strength: float = Field(default=0.10, ge=0.05, le=0.30)
+    min_price_for_yes: int = Field(default=70, ge=60, le=90)
+    max_price_for_no: int = Field(default=30, ge=10, le=40)
+
+
+class NewMarketSettings(BaseModel):
+    """Settings for the New Market Detector Agent."""
+
+    enabled: bool = Field(default=True)
+    update_interval_minutes: int = Field(default=5, ge=1, le=30)
+    new_market_window_hours: float = Field(default=48.0, ge=12.0, le=168.0)
+    min_fair_value_edge: float = Field(default=0.10, ge=0.05, le=0.30)
+
+
+class ConsistencySettings(BaseModel):
+    """Settings for the Consistency Arbitrage Agent."""
+
+    enabled: bool = Field(default=True)
+    update_interval_minutes: int = Field(default=10, ge=5, le=60)
+    min_violation_magnitude: float = Field(default=0.05, ge=0.02, le=0.20)
+    require_guaranteed_profit: bool = Field(default=True)
+
+
+class EconomicDataSettings(BaseModel):
+    """Settings for the Economic Data Agent."""
+
+    enabled: bool = Field(default=True)
+    update_interval_minutes: int = Field(default=60, ge=15, le=240)
+    min_edge: float = Field(default=0.08, ge=0.05, le=0.20)
+    max_days_to_settlement: float = Field(default=7.0, ge=1.0, le=30.0)
+    fred_api_key: str = Field(default="")
+
+
 class AgentsSettings(BaseModel):
     """Settings for all trading agents."""
 
@@ -205,6 +244,18 @@ class AgentsSettings(BaseModel):
     )
     weather_risk: WeatherRiskSettings = Field(
         default_factory=WeatherRiskSettings
+    )
+    settlement_momentum: SettlementMomentumSettings = Field(
+        default_factory=SettlementMomentumSettings
+    )
+    new_market: NewMarketSettings = Field(
+        default_factory=NewMarketSettings
+    )
+    consistency: ConsistencySettings = Field(
+        default_factory=ConsistencySettings
+    )
+    economic_data: EconomicDataSettings = Field(
+        default_factory=EconomicDataSettings
     )
 
 

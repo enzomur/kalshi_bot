@@ -44,8 +44,15 @@ from kalshi_bot.ml.self_correction.disabler import StrategyDisabler
 
 # Agent imports
 from kalshi_bot.agents.weather.agent import WeatherResearchAgent
+from kalshi_bot.agents.weather.weather_trader import WeatherTrader
 from kalshi_bot.agents.signal_tester.agent import SignalTesterAgent
 from kalshi_bot.agents.risk.agent import WeatherRiskAgent
+
+# Event-driven agent imports
+from kalshi_bot.agents.settlement_momentum.agent import SettlementMomentumAgent
+from kalshi_bot.agents.new_market.agent import NewMarketAgent
+from kalshi_bot.agents.consistency.agent import ConsistencyAgent
+from kalshi_bot.agents.economic.agent import EconomicDataAgent
 
 logger = get_logger(__name__)
 
@@ -113,9 +120,16 @@ class KalshiArbitrageBot:
 
         # Agent components
         self._weather_agent: WeatherResearchAgent | None = None
+        self._weather_trader: WeatherTrader | None = None
         self._signal_tester: SignalTesterAgent | None = None
         self._weather_risk_agent: WeatherRiskAgent | None = None
         self._agents_enabled = False
+
+        # Event-driven agent components
+        self._settlement_momentum_agent: SettlementMomentumAgent | None = None
+        self._new_market_agent: NewMarketAgent | None = None
+        self._consistency_agent: ConsistencyAgent | None = None
+        self._economic_agent: EconomicDataAgent | None = None
 
         # Check paper trading mode
         self._paper_trading_mode = getattr(
@@ -284,7 +298,11 @@ class KalshiArbitrageBot:
         any_enabled = (
             agent_settings.weather_research.enabled or
             agent_settings.signal_tester.enabled or
-            agent_settings.weather_risk.enabled
+            agent_settings.weather_risk.enabled or
+            agent_settings.settlement_momentum.enabled or
+            agent_settings.new_market.enabled or
+            agent_settings.consistency.enabled or
+            agent_settings.economic_data.enabled
         )
 
         if not any_enabled:
@@ -306,6 +324,15 @@ class KalshiArbitrageBot:
                 f"Weather agent initialized for locations: "
                 f"{agent_settings.weather_research.enabled_locations}"
             )
+
+            # Initialize Weather Trader (uses NWS forecasts directly)
+            self._weather_trader = WeatherTrader(
+                weather_agent=self._weather_agent,
+                api_client=self._api_client,
+                min_edge=0.10,  # 10% minimum edge
+                min_confidence=0.60,
+            )
+            logger.info("Weather trader initialized (direct NWS forecast trading)")
 
         # Initialize Signal Tester Agent
         if agent_settings.signal_tester.enabled:
@@ -329,6 +356,57 @@ class KalshiArbitrageBot:
                 enabled=True,
             )
             logger.info("Weather risk agent initialized")
+
+        # Initialize Settlement Momentum Agent
+        if agent_settings.settlement_momentum.enabled:
+            self._settlement_momentum_agent = SettlementMomentumAgent(
+                db=self._db,
+                api_client=self._api_client,
+                max_hours_to_settlement=agent_settings.settlement_momentum.max_hours_to_settlement,
+                min_momentum_strength=agent_settings.settlement_momentum.min_momentum_strength,
+                min_price_for_yes=agent_settings.settlement_momentum.min_price_for_yes,
+                max_price_for_no=agent_settings.settlement_momentum.max_price_for_no,
+                update_interval_minutes=agent_settings.settlement_momentum.update_interval_minutes,
+                enabled=True,
+            )
+            logger.info("Settlement momentum agent initialized")
+
+        # Initialize New Market Agent
+        if agent_settings.new_market.enabled:
+            self._new_market_agent = NewMarketAgent(
+                db=self._db,
+                api_client=self._api_client,
+                new_market_window_hours=agent_settings.new_market.new_market_window_hours,
+                min_fair_value_edge=agent_settings.new_market.min_fair_value_edge,
+                update_interval_minutes=agent_settings.new_market.update_interval_minutes,
+                enabled=True,
+            )
+            logger.info("New market agent initialized")
+
+        # Initialize Consistency Arbitrage Agent
+        if agent_settings.consistency.enabled:
+            self._consistency_agent = ConsistencyAgent(
+                db=self._db,
+                api_client=self._api_client,
+                min_violation_magnitude=agent_settings.consistency.min_violation_magnitude,
+                require_guaranteed_profit=agent_settings.consistency.require_guaranteed_profit,
+                update_interval_minutes=agent_settings.consistency.update_interval_minutes,
+                enabled=True,
+            )
+            logger.info("Consistency arbitrage agent initialized")
+
+        # Initialize Economic Data Agent
+        if agent_settings.economic_data.enabled:
+            self._economic_agent = EconomicDataAgent(
+                db=self._db,
+                api_client=self._api_client,
+                fred_api_key=agent_settings.economic_data.fred_api_key or None,
+                min_edge=agent_settings.economic_data.min_edge,
+                max_days_to_settlement=agent_settings.economic_data.max_days_to_settlement,
+                update_interval_minutes=agent_settings.economic_data.update_interval_minutes,
+                enabled=True,
+            )
+            logger.info("Economic data agent initialized")
 
         logger.info("Agent system initialized")
 
@@ -389,6 +467,35 @@ class KalshiArbitrageBot:
             background_tasks.append(risk_task)
             logger.info("Weather risk agent started")
 
+        # Start event-driven agent background tasks
+        if self._settlement_momentum_agent:
+            momentum_task = asyncio.create_task(
+                self._settlement_momentum_agent.start(self._shutdown_event)
+            )
+            background_tasks.append(momentum_task)
+            logger.info("Settlement momentum agent started")
+
+        if self._new_market_agent:
+            new_market_task = asyncio.create_task(
+                self._new_market_agent.start(self._shutdown_event)
+            )
+            background_tasks.append(new_market_task)
+            logger.info("New market agent started")
+
+        if self._consistency_agent:
+            consistency_task = asyncio.create_task(
+                self._consistency_agent.start(self._shutdown_event)
+            )
+            background_tasks.append(consistency_task)
+            logger.info("Consistency arbitrage agent started")
+
+        if self._economic_agent:
+            economic_task = asyncio.create_task(
+                self._economic_agent.start(self._shutdown_event)
+            )
+            background_tasks.append(economic_task)
+            logger.info("Economic data agent started")
+
         try:
             await self._main_loop()
         except asyncio.CancelledError:
@@ -432,6 +539,9 @@ class KalshiArbitrageBot:
         # Clean up agents
         if self._weather_agent:
             await self._weather_agent.close()
+
+        if self._economic_agent:
+            await self._economic_agent.close()
 
         if self._ws_manager:
             await self._ws_manager.disconnect()
@@ -511,6 +621,19 @@ class KalshiArbitrageBot:
                 logger.info(f"ML opportunities found: {len(ml_opportunities)}")
                 opportunities.extend(ml_opportunities)
 
+        # Weather: Get weather trading opportunities if weather trader is enabled
+        if self._weather_trader:
+            weather_opportunities = await self._get_weather_opportunities()
+            if weather_opportunities:
+                logger.info(f"Weather opportunities found: {len(weather_opportunities)}")
+                opportunities.extend(weather_opportunities)
+
+        # Event-driven agents: Get opportunities from each enabled agent
+        event_driven_opps = await self._get_event_driven_opportunities()
+        if event_driven_opps:
+            logger.info(f"Event-driven opportunities found: {len(event_driven_opps)}")
+            opportunities.extend(event_driven_opps)
+
         if not opportunities:
             logger.debug("No opportunities found")
             return
@@ -529,7 +652,7 @@ class KalshiArbitrageBot:
 
         # Use paper trading balance if in paper mode, otherwise real balance
         if self._paper_trading_mode:
-            available_capital = self._paper_executor.get_status().get("balance", 0)
+            available_capital = self._paper_executor.get_status().get("current_balance", 0)
         else:
             available_capital = self._portfolio_manager.available_for_trading
 
@@ -558,6 +681,91 @@ class KalshiArbitrageBot:
         except Exception as e:
             logger.error(f"Error getting ML opportunities: {e}")
             return []
+
+    async def _get_weather_opportunities(self) -> list[ArbitrageOpportunity]:
+        """Get weather trading opportunities based on NWS forecasts."""
+        if not self._weather_trader:
+            return []
+
+        # Use paper trading balance if in paper mode, otherwise real balance
+        if self._paper_trading_mode:
+            available_capital = self._paper_executor.get_status().get("current_balance", 0)
+        else:
+            available_capital = self._portfolio_manager.available_for_trading
+
+        if available_capital < 1.0:
+            logger.debug(f"Weather opportunities: insufficient capital (${available_capital:.2f})")
+            return []
+
+        try:
+            opportunities = await self._weather_trader.get_trading_opportunities(
+                available_capital=available_capital,
+                max_opportunities=3,  # Limit weather trades
+            )
+            return opportunities
+
+        except Exception as e:
+            logger.error(f"Error getting weather opportunities: {e}")
+            return []
+
+    async def _get_event_driven_opportunities(self) -> list[ArbitrageOpportunity]:
+        """Get opportunities from all event-driven agents."""
+        # Use paper trading balance if in paper mode, otherwise real balance
+        if self._paper_trading_mode:
+            available_capital = self._paper_executor.get_status().get("current_balance", 0)
+        else:
+            available_capital = self._portfolio_manager.available_for_trading
+
+        if available_capital < 1.0:
+            return []
+
+        opportunities = []
+
+        # Settlement Momentum Agent
+        if self._settlement_momentum_agent:
+            try:
+                momentum_opps = await self._settlement_momentum_agent.get_trading_opportunities(
+                    available_capital=available_capital,
+                    max_opportunities=3,
+                )
+                opportunities.extend(momentum_opps)
+            except Exception as e:
+                logger.error(f"Error getting settlement momentum opportunities: {e}")
+
+        # New Market Agent
+        if self._new_market_agent:
+            try:
+                new_market_opps = await self._new_market_agent.get_trading_opportunities(
+                    available_capital=available_capital,
+                    max_opportunities=3,
+                )
+                opportunities.extend(new_market_opps)
+            except Exception as e:
+                logger.error(f"Error getting new market opportunities: {e}")
+
+        # Consistency Arbitrage Agent
+        if self._consistency_agent:
+            try:
+                consistency_opps = await self._consistency_agent.get_trading_opportunities(
+                    available_capital=available_capital,
+                    max_opportunities=3,
+                )
+                opportunities.extend(consistency_opps)
+            except Exception as e:
+                logger.error(f"Error getting consistency opportunities: {e}")
+
+        # Economic Data Agent
+        if self._economic_agent:
+            try:
+                economic_opps = await self._economic_agent.get_trading_opportunities(
+                    available_capital=available_capital,
+                    max_opportunities=3,
+                )
+                opportunities.extend(economic_opps)
+            except Exception as e:
+                logger.error(f"Error getting economic opportunities: {e}")
+
+        return opportunities
 
     async def _process_opportunity(
         self,
@@ -789,6 +997,10 @@ class KalshiArbitrageBot:
                 "weather_research": self._weather_agent.get_status() if self._weather_agent else None,
                 "signal_tester": self._signal_tester.get_status() if self._signal_tester else None,
                 "weather_risk": self._weather_risk_agent.get_status() if self._weather_risk_agent else None,
+                "settlement_momentum": self._settlement_momentum_agent.get_status() if self._settlement_momentum_agent else None,
+                "new_market": self._new_market_agent.get_status() if self._new_market_agent else None,
+                "consistency": self._consistency_agent.get_status() if self._consistency_agent else None,
+                "economic_data": self._economic_agent.get_status() if self._economic_agent else None,
             }
 
         return {
