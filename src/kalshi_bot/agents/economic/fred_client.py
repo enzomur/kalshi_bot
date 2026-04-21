@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+import ssl
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
 import aiohttp
+import certifi
 
 from kalshi_bot.utils.logging import get_logger
 
@@ -84,7 +86,10 @@ class FREDClient:
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            # Use certifi for proper SSL certificate handling on macOS
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            self._session = aiohttp.ClientSession(connector=connector)
         return self._session
 
     async def close(self) -> None:
