@@ -8,6 +8,11 @@ import signal
 import sys
 from typing import Any
 
+from dotenv import load_dotenv
+
+# Load .env file before any other imports that might read environment variables
+load_dotenv()
+
 from kalshi_bot.bot import KalshiArbitrageBot
 from kalshi_bot.config.settings import Settings, get_settings
 from kalshi_bot.utils.logging import get_logger, setup_logging

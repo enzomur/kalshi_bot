@@ -1,0 +1,41 @@
+# Risk Management Configuration
+# =============================
+# Controls the Risk Engine's gatekeeper behavior.
+
+# Position sizing
+sizing:
+  kelly_fraction: 0.25           # Use quarter Kelly for safety
+  max_position_contracts: 100    # Max contracts per position
+  max_position_dollars: 500.0    # Max dollars per position
+  max_total_exposure: 2000.0     # Max total portfolio exposure
+
+# Circuit breakers
+circuit_breakers:
+  max_daily_loss: 100.0          # Stop trading after $100 daily loss
+  max_drawdown: 0.20             # Stop at 20% drawdown from peak
+  max_consecutive_losses: 5      # Stop after 5 consecutive losses
+  cooldown_minutes: 30           # Cooldown period after trigger
+
+# Risk checks
+checks:
+  require_positive_ev: true      # Only trade positive EV signals
+  min_liquidity_contracts: 5     # Minimum orderbook depth
+  max_spread_cents: 10           # Maximum bid-ask spread
+  min_time_to_close_hours: 1.0   # Don't trade near market close
+
+# Correlation limits (Phase 2)
+correlation:
+  max_category_exposure: 0.30    # Max 30% in one category
+  max_correlated_positions: 3    # Max positions in correlated markets
+
+# Mode-specific overrides
+mode_overrides:
+  live_probation:
+    max_position_dollars: 500.0
+    max_daily_loss: 100.0
+    kelly_fraction: 0.15
+
+  live_full:
+    max_position_dollars: 2000.0
+    max_daily_loss: 500.0
+    kelly_fraction: 0.25

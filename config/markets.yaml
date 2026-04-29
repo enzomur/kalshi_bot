@@ -1,0 +1,60 @@
+# Market Configuration
+# ====================
+# Whitelist and blacklist patterns for market filtering.
+
+# Markets to include (regex patterns)
+# If empty, all markets are considered
+whitelist:
+  - "^KXTEMP-"      # Temperature markets
+  - "^KXPRECIP-"    # Precipitation markets
+  - "^INXD-"        # Economic indicator markets
+  - "^FED-"         # Fed rate markets
+
+# Markets to exclude (regex patterns)
+# Applied after whitelist
+blacklist:
+  - "-TEST-"        # Test markets
+  - "-DEMO-"        # Demo markets
+
+# Category-specific settings
+categories:
+  weather:
+    enabled: true
+    patterns:
+      - "^KXTEMP-"
+      - "^KXPRECIP-"
+      - "^KXSNOW-"
+    locations:
+      NYC:
+        station_id: "KNYC"
+        timezone: "America/New_York"
+      CHI:
+        station_id: "KORD"
+        timezone: "America/Chicago"
+      LAX:
+        station_id: "KLAX"
+        timezone: "America/Los_Angeles"
+      MIA:
+        station_id: "KMIA"
+        timezone: "America/New_York"
+
+  economic:
+    enabled: false  # Enable when FRED API key is configured
+    patterns:
+      - "^INXD-"
+      - "^CPI-"
+      - "^GDP-"
+      - "^UNRATE-"
+
+  fed:
+    enabled: true
+    patterns:
+      - "^FED-"
+      - "^FOMC-"
+
+# Liquidity filters
+liquidity:
+  min_volume: 10           # Minimum 24h volume
+  min_open_interest: 5     # Minimum open interest
+  require_orderbook: true  # Must have bid/ask prices
+  max_spread_cents: 15     # Maximum spread to consider

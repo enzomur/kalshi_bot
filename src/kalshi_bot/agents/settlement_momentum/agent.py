@@ -159,13 +159,20 @@ class SettlementMomentumAgent(BaseAgent):
 
         # Calculate momentum for each
         signals = []
-        for market in markets:
-            signal = await self._analyze_market(market)
-            if signal and self._momentum_calc.should_trade(signal, self._min_momentum):
-                signals.append(signal)
-                self._signals[market["ticker"]] = signal
+        for i, market in enumerate(markets):
+            ticker = market.get("ticker", "unknown")
+            logger.debug(f"Analyzing market {i+1}/{len(markets)}: {ticker}")
+            try:
+                signal = await self._analyze_market(market)
+                if signal and self._momentum_calc.should_trade(signal, self._min_momentum):
+                    signals.append(signal)
+                    self._signals[market["ticker"]] = signal
+                    logger.debug(f"Signal generated for {ticker}: {signal.direction}")
+            except Exception as e:
+                logger.warning(f"Error analyzing market {ticker}: {e}")
 
         # Store signals in database
+        logger.debug(f"Storing {len(signals)} signals")
         await self._store_signals(signals)
 
         # Update metrics
@@ -182,44 +189,78 @@ class SettlementMomentumAgent(BaseAgent):
         )
 
     async def _get_settling_markets(self) -> list[dict]:
-        """Get markets that are settling within the time window."""
+        """Get markets that are settling within the time window from local database."""
         now = datetime.now(timezone.utc)
-        max_settlement = now + timedelta(hours=self._max_hours)
-        min_settlement = now + timedelta(hours=1)
+        min_hours = 1
+        max_hours = self._max_hours
 
+        # Simple, fast query: get recent snapshots with close_time in window
+        # Using a simple query without subquery for performance
         try:
-            # Get markets from Kalshi
-            markets, _ = await self._api_client.get_markets(
-                status="open",
-                limit=200,
+            rows = await self._db.fetch_all(
+                """
+                SELECT DISTINCT
+                    ticker,
+                    event_ticker,
+                    last_price,
+                    yes_bid,
+                    yes_ask,
+                    volume,
+                    close_time
+                FROM market_snapshots
+                WHERE close_time IS NOT NULL
+                  AND last_price IS NOT NULL
+                  AND close_time > datetime('now', '+1 hour')
+                  AND close_time < datetime('now', '+48 hours')
+                  AND snapshot_at > datetime('now', '-1 hour')
+                ORDER BY close_time ASC
+                LIMIT 200
+                """,
             )
         except Exception as e:
-            logger.error(f"Failed to fetch markets: {e}")
+            logger.error(f"Failed to query settling markets: {e}")
             return []
 
         settling_markets = []
+        seen_tickers = set()
 
-        for market in markets:
-            close_time = market.close_time
-            if not close_time:
+        for row in rows:
+            ticker = row["ticker"]
+            if ticker in seen_tickers:
                 continue
+            seen_tickers.add(ticker)
 
-            # close_time is already a datetime from MarketData
-            if min_settlement <= close_time <= max_settlement:
+            try:
+                close_time_str = row["close_time"]
+                if isinstance(close_time_str, str):
+                    # Parse close_time string to datetime
+                    if close_time_str.endswith("Z"):
+                        close_time_str = close_time_str[:-1] + "+00:00"
+                    close_time = datetime.fromisoformat(close_time_str.replace("+00:00", "")).replace(tzinfo=timezone.utc)
+                else:
+                    close_time = close_time_str
+
                 hours_to_settlement = (close_time - now).total_seconds() / 3600
-                # Convert to dict with extra fields for downstream processing
+
+                if hours_to_settlement < min_hours or hours_to_settlement > max_hours:
+                    continue
+
                 market_dict = {
-                    "ticker": market.ticker,
-                    "event_ticker": market.event_ticker,
-                    "last_price": market.last_price,
-                    "yes_bid": market.yes_bid,
-                    "yes_ask": market.yes_ask,
-                    "volume": market.volume,
+                    "ticker": ticker,
+                    "event_ticker": row["event_ticker"] or "",
+                    "last_price": row["last_price"],
+                    "yes_bid": row["yes_bid"],
+                    "yes_ask": row["yes_ask"],
+                    "volume": row["volume"] or 0,
                     "_close_time": close_time,
                     "_hours_to_settlement": hours_to_settlement,
                 }
                 settling_markets.append(market_dict)
+            except (ValueError, TypeError, KeyError) as e:
+                logger.debug(f"Skipping market {row.get('ticker', 'unknown')}: {e}")
+                continue
 
+        logger.info(f"Found {len(settling_markets)} markets settling within {max_hours}h")
         return settling_markets
 
     async def _analyze_market(self, market: dict) -> MomentumSignal | None:
@@ -261,31 +302,39 @@ class SettlementMomentumAgent(BaseAgent):
         self, ticker: str
     ) -> tuple[int | None, int | None]:
         """Get historical prices from market_snapshots table."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
-        # 6 hours ago
+        # 6 hours ago - use simpler query with LIMIT for performance
         time_6h = now - timedelta(hours=6)
-        row_6h = await self._db.fetch_one(
-            """
-            SELECT yes_price FROM market_snapshots
-            WHERE ticker = ? AND snapshot_time <= ?
-            ORDER BY snapshot_time DESC LIMIT 1
-            """,
-            (ticker, time_6h.isoformat()),
-        )
-        price_6h = row_6h["yes_price"] if row_6h else None
+        try:
+            row_6h = await self._db.fetch_one(
+                """
+                SELECT last_price FROM market_snapshots
+                WHERE ticker = ? AND snapshot_at <= ?
+                ORDER BY snapshot_at DESC LIMIT 1
+                """,
+                (ticker, time_6h.strftime("%Y-%m-%dT%H:%M:%S")),
+            )
+            price_6h = row_6h["last_price"] if row_6h else None
+        except Exception as e:
+            logger.debug(f"Error fetching 6h price for {ticker}: {e}")
+            price_6h = None
 
         # 24 hours ago
         time_24h = now - timedelta(hours=24)
-        row_24h = await self._db.fetch_one(
-            """
-            SELECT yes_price FROM market_snapshots
-            WHERE ticker = ? AND snapshot_time <= ?
-            ORDER BY snapshot_time DESC LIMIT 1
-            """,
-            (ticker, time_24h.isoformat()),
-        )
-        price_24h = row_24h["yes_price"] if row_24h else None
+        try:
+            row_24h = await self._db.fetch_one(
+                """
+                SELECT last_price FROM market_snapshots
+                WHERE ticker = ? AND snapshot_at <= ?
+                ORDER BY snapshot_at DESC LIMIT 1
+                """,
+                (ticker, time_24h.strftime("%Y-%m-%dT%H:%M:%S")),
+            )
+            price_24h = row_24h["last_price"] if row_24h else None
+        except Exception as e:
+            logger.debug(f"Error fetching 24h price for {ticker}: {e}")
+            price_24h = None
 
         return price_6h, price_24h
 

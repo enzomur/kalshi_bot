@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Generator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+# Ensure src is in path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 os.environ.setdefault("KALSHI_API_KEY_ID", "test-api-key")
 os.environ.setdefault("KALSHI_PRIVATE_KEY_PATH", "")
@@ -188,3 +192,47 @@ async def database(temp_db_path: Path) -> AsyncGenerator[Any, None]:
     await db.initialize()
     yield db
     await db.close()
+
+
+# ============================================================================
+# New src/ module fixtures (Phase 2 architecture)
+# ============================================================================
+
+@pytest.fixture
+def paper_broker():
+    """Create a fresh paper broker for testing."""
+    from src.execution.paper_broker import PaperBroker
+    return PaperBroker(db=None, initial_balance=1000.0, slippage_bps=10)
+
+
+@pytest.fixture
+def mock_mode_manager() -> MagicMock:
+    """Create a mock mode manager in PAPER mode."""
+    from src.core.types import TradingMode
+
+    manager = MagicMock()
+    manager.current_mode = TradingMode.PAPER
+    manager.is_paper = True
+    manager.is_live = False
+    manager.config = MagicMock()
+    manager.config.max_position_dollars = 10000.0
+    manager.config.max_daily_loss_dollars = 10000.0
+    manager.config.mode = TradingMode.PAPER
+    return manager
+
+
+@pytest.fixture
+def sample_signal():
+    """Create a sample valid signal for testing."""
+    from src.core.types import Signal
+
+    return Signal.create(
+        strategy_name="test_strategy",
+        market_ticker="TEST-MARKET-123",
+        direction="yes",
+        target_probability=0.65,
+        market_probability=0.50,
+        confidence=0.75,
+        max_position=50,
+        metadata={"market_price_cents": 50},
+    )

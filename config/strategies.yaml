@@ -1,0 +1,49 @@
+# Strategy Configuration
+# ======================
+# Configure weights and thresholds for trading strategies.
+# Strategies emit Signals; the Risk Engine decides execution.
+
+# Global strategy settings
+defaults:
+  min_edge: 0.05           # Minimum edge required (5%)
+  min_confidence: 0.60     # Minimum confidence required (60%)
+  max_signals_per_hour: 10 # Rate limit on signals
+
+# Individual strategy configurations
+strategies:
+  weather:
+    enabled: true
+    weight: 1.0            # Voting weight in ensemble
+    min_edge: 0.08         # Strategy-specific minimum edge
+    min_confidence: 0.65
+    locations:
+      - NYC
+      - CHI
+      - LAX
+      - MIA
+
+  settlement_momentum:
+    enabled: true
+    weight: 0.8
+    min_edge: 0.10
+    max_hours_to_settlement: 48.0
+    min_price_for_yes: 70  # Only bet YES when price > 70c
+    max_price_for_no: 30   # Only bet NO when price < 30c
+
+  economic_data:
+    enabled: false         # Disabled until FRED API configured
+    weight: 0.6
+    min_edge: 0.08
+    max_days_to_settlement: 7.0
+
+  new_market:
+    enabled: true
+    weight: 0.5
+    min_fair_value_edge: 0.10
+    new_market_window_hours: 48.0
+
+# Ensemble voting settings
+voting:
+  method: weighted_average  # or: majority, unanimous
+  min_strategies: 1         # Minimum strategies that must agree
+  confidence_threshold: 0.60

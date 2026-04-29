@@ -83,6 +83,9 @@ logs/
 *.sqlite
 *.sqlite3
 
+# Secrets directory - NEVER commit!
+secrets/
+
 # Private keys - NEVER commit these!
 *.pem
 *.key

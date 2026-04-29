@@ -1,0 +1,22 @@
+# Trading Mode Configuration
+# =========================
+# This file controls the trading mode of the bot.
+#
+# Modes:
+#   - paper: All trades are simulated (DEFAULT)
+#   - live_probation: Real trades with reduced limits
+#   - live_full: Full live trading
+#
+# IMPORTANT: Live modes require a valid cryptographic signature.
+# Use scripts/promote_mode.py to generate signed configurations.
+
+mode: paper
+
+# Optional metadata (informational only for PAPER mode)
+activated_at: null
+activated_by: null
+reason: "Default safe mode - paper trading"
+
+# Position limits (enforced by Risk Engine)
+max_position_dollars: 10000.0
+max_daily_loss_dollars: 10000.0
