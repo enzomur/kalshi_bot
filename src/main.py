@@ -27,6 +27,7 @@ import yaml
 from src.core.mode import verify_mode_on_startup, get_mode_manager, ModeManager
 from src.core.types import TradingMode, Signal
 from src.data.kalshi import KalshiClient, WebSocketManager
+from src.data.odds_feed import OddsFeed
 from src.execution.paper_broker import PaperBroker
 from src.ledger.database import Database
 from src.metrics import BrierCalculator, PerformanceTracker, CalibrationCurve, TradeResult
@@ -34,6 +35,7 @@ from src.observability.logging import setup_logging, get_logger, new_correlation
 from src.risk.engine import RiskEngine
 from src.strategies.base import Strategy
 from src.strategies.weather import WeatherStrategy
+from src.strategies.calibration import CalibrationStrategy
 from src.voting import VotingEnsemble
 
 
@@ -255,10 +257,33 @@ class TradingBot:
                 enabled_locations=weather_config.get("enabled_locations"),
             )
             self._strategies.append(weather_strategy)
-            logger.info(f"Initialized weather strategy")
+            logger.info("Initialized weather strategy")
 
-        # Additional strategies will be added here in Phase 2/3
-        # - calibration strategy (uses external odds)
+        # Calibration strategy (uses external odds from sportsbooks)
+        calibration_config = strategies_config.get("calibration", {})
+        if calibration_config.get("enabled", True):
+            # Initialize odds feed
+            odds_api_key = os.getenv("ODDS_API_KEY", "")
+            odds_feed = OddsFeed(api_key=odds_api_key) if odds_api_key else None
+
+            if odds_feed:
+                await odds_feed.connect()
+
+            calibration_strategy = CalibrationStrategy(
+                odds_feed=odds_feed,
+                db=self._db,
+                enabled=True,
+                min_edge=calibration_config.get("min_edge", 0.05),
+                min_confidence=calibration_config.get("min_confidence", 0.60),
+                enabled_sports=calibration_config.get("enabled_sports", ["NFL", "NBA"]),
+            )
+            self._strategies.append(calibration_strategy)
+            logger.info(
+                f"Initialized calibration strategy "
+                f"(odds_feed={'enabled' if odds_feed else 'disabled'})"
+            )
+
+        # Phase 3 strategies (not yet implemented):
         # - arbitrage strategy (cross-market)
         # - market_make strategy (spread capture)
         # - mean_reversion strategy (fade overreactions)

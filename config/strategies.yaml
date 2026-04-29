@@ -16,11 +16,21 @@ strategies:
     weight: 1.0            # Voting weight in ensemble
     min_edge: 0.08         # Strategy-specific minimum edge
     min_confidence: 0.65
-    locations:
+    enabled_locations:
       - NYC
       - CHI
       - LAX
       - MIA
+
+  calibration:
+    enabled: true
+    weight: 1.2            # Higher weight - sportsbook consensus is reliable
+    min_edge: 0.05         # 5% edge required
+    min_confidence: 0.60
+    enabled_sports:
+      - NFL
+      - NBA
+      - MLB
 
   settlement_momentum:
     enabled: true

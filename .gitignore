@@ -77,8 +77,9 @@ dmypy.json
 .ruff_cache/
 
 # Project specific
-data/
+/data/
 logs/
+!src/data/
 *.db
 *.sqlite
 *.sqlite3

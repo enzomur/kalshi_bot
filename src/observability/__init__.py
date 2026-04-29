@@ -12,7 +12,15 @@ from src.observability.logging import (
     log_execution,
 )
 
+from src.observability.dashboard import (
+    CLIDashboard,
+    DashboardManager,
+    print_startup_banner,
+    print_shutdown_summary,
+)
+
 __all__ = [
+    # Logging
     "setup_logging",
     "get_logger",
     "get_correlation_id",
@@ -22,4 +30,9 @@ __all__ = [
     "log_signal",
     "log_decision",
     "log_execution",
+    # Dashboard
+    "CLIDashboard",
+    "DashboardManager",
+    "print_startup_banner",
+    "print_shutdown_summary",
 ]
