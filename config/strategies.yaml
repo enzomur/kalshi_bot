@@ -52,6 +52,17 @@ strategies:
     min_fair_value_edge: 0.10
     new_market_window_hours: 48.0
 
+  mean_reversion:
+    enabled: true
+    weight: 0.7            # Moderate weight - statistical strategy
+    min_edge: 0.05         # 5% minimum edge
+    min_confidence: 0.55
+    lookback_periods: 24   # Hours of price history
+    z_score_threshold: 2.0 # Standard deviations for signal
+    min_samples: 12        # Minimum data points required
+    max_hours_to_settlement: 72.0
+    reversion_target: 0.5  # Expect 50% reversion to mean
+
   arbitrage:
     enabled: true
     weight: 1.5            # High weight - arbitrage is guaranteed profit

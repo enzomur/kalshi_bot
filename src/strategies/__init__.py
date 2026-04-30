@@ -9,6 +9,7 @@ from src.strategies.weather import WeatherStrategy
 from src.strategies.calibration import CalibrationStrategy
 from src.strategies.arbitrage import ArbitrageStrategy
 from src.strategies.market_make import MarketMakingStrategy
+from src.strategies.mean_reversion import MeanReversionStrategy
 
 __all__ = [
     "Strategy",
@@ -17,4 +18,5 @@ __all__ = [
     "CalibrationStrategy",
     "ArbitrageStrategy",
     "MarketMakingStrategy",
+    "MeanReversionStrategy",
 ]
