@@ -47,13 +47,29 @@ strategies:
     max_days_to_settlement: 7.0
 
   new_market:
-    enabled: true
+    enabled: false  # Disabled - not implemented
     weight: 0.5
     min_fair_value_edge: 0.10
     new_market_window_hours: 48.0
 
+  arbitrage:
+    enabled: true
+    weight: 1.5            # High weight - arbitrage is guaranteed profit
+    min_profit: 0.01       # 1% minimum profit after fees
+    fees: 0.02             # 2% estimated fees (both platforms)
+
+  market_make:
+    enabled: false         # Disabled by default - requires active management
+    weight: 0.8
+    min_spread_cents: 3
+    max_inventory: 50
+    quote_size: 10
+    target_markets: []     # Empty = auto-select liquid markets
+
 # Ensemble voting settings
 voting:
   method: weighted_average  # or: majority, unanimous
-  min_strategies: 1         # Minimum strategies that must agree
-  confidence_threshold: 0.60
+  min_strategies: 2         # Require 2+ strategies to agree for production
+  min_edge: 0.03            # 3% minimum edge after aggregation
+  min_confidence: 0.55
+  fee_adjustment: 0.01      # 1% fee adjustment

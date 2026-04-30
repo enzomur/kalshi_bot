@@ -412,6 +412,51 @@ class VotingEnsemble:
             },
         }
 
+    def set_multi_strategy_mode(self, enabled: bool = True) -> None:
+        """
+        Enable or disable multi-strategy mode.
+
+        In multi-strategy mode, at least 2 strategies must agree on direction.
+        In single-strategy mode, 1 strategy is sufficient.
+
+        Args:
+            enabled: True for multi-strategy (min_agreement=2), False for single (min_agreement=1)
+        """
+        self._min_agreement = 2 if enabled else 1
+        logger.info(f"Voting mode: {'multi-strategy' if enabled else 'single-strategy'} (min_agreement={self._min_agreement})")
+
+    @property
+    def is_multi_strategy_mode(self) -> bool:
+        """Check if multi-strategy mode is enabled."""
+        return self._min_agreement >= 2
+
+    def get_agreement_summary(self, signals: list[Signal]) -> dict[str, Any]:
+        """
+        Get summary of strategy agreement for debugging.
+
+        Args:
+            signals: List of signals to analyze
+
+        Returns:
+            Summary of which strategies agree/disagree
+        """
+        by_market: dict[str, dict[str, list[str]]] = {}
+
+        for signal in signals:
+            ticker = signal.market_ticker
+            if ticker not in by_market:
+                by_market[ticker] = {"yes": [], "no": []}
+            by_market[ticker][signal.direction].append(signal.strategy_name)
+
+        return {
+            ticker: {
+                "yes_strategies": data["yes"],
+                "no_strategies": data["no"],
+                "agreement": len(data["yes"]) >= self._min_agreement or len(data["no"]) >= self._min_agreement,
+            }
+            for ticker, data in by_market.items()
+        }
+
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> VotingEnsemble:
         """
@@ -442,10 +487,13 @@ class VotingEnsemble:
             if strategy_config.get("enabled", True):
                 strategy_weights[name] = strategy_config.get("weight", 1.0)
 
+        # Get voting config
+        voting_config = config.get("voting", {})
+
         return cls(
             strategy_weights=strategy_weights,
-            min_edge=config.get("min_edge", cls.DEFAULT_MIN_EDGE),
-            min_confidence=config.get("min_confidence", cls.DEFAULT_MIN_CONFIDENCE),
-            min_agreement=config.get("min_agreement", cls.DEFAULT_MIN_AGREEMENT),
-            fee_adjustment=config.get("fee_adjustment", cls.DEFAULT_FEE_ADJUSTMENT),
+            min_edge=voting_config.get("min_edge", config.get("min_edge", cls.DEFAULT_MIN_EDGE)),
+            min_confidence=voting_config.get("min_confidence", config.get("min_confidence", cls.DEFAULT_MIN_CONFIDENCE)),
+            min_agreement=voting_config.get("min_strategies", config.get("min_agreement", cls.DEFAULT_MIN_AGREEMENT)),
+            fee_adjustment=voting_config.get("fee_adjustment", config.get("fee_adjustment", cls.DEFAULT_FEE_ADJUSTMENT)),
         )
